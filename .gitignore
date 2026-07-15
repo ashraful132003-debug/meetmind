@@ -33,3 +33,6 @@ Thumbs.db
 
 # Built SPA copied here for the single-image production build
 /static/
+
+# Local notes with generated secrets - never commit
+RENDER_SECRETS.txt

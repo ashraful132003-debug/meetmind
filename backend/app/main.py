@@ -58,10 +58,45 @@ logging.basicConfig(
 log = logging.getLogger("meetmind")
 
 
+def _preflight() -> None:
+    """Check the database hostname resolves, and say something useful if not.
+
+    asyncpg's failure here is `socket.gaierror: [Errno -2] Name or service not
+    known` buried in a 30-line traceback. That points at DNS and gives no hint
+    that the actual cause is usually a typo or an invisible newline in the env
+    var - which is exactly what happened on the first deploy of this app.
+    """
+    import socket
+
+    host = settings.postgres_host
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return
+
+    try:
+        socket.getaddrinfo(host, settings.postgres_port)
+    except socket.gaierror:
+        log.error(
+            "Cannot resolve POSTGRES_HOST=%r.\n"
+            "  The hostname does not exist as far as DNS is concerned. Usually one of:\n"
+            "    - a typo in POSTGRES_HOST\n"
+            "    - a stray space or newline in the value (dashboards paste these invisibly)\n"
+            "    - the whole connection string pasted in instead of just the host\n"
+            "  It should look like: ep-something-12345.region.aws.neon.tech\n"
+            "  (no 'postgresql://', no username, no '/dbname', no '?sslmode=require')",
+            host,
+        )
+        raise RuntimeError(f"POSTGRES_HOST {host!r} does not resolve — see the log above") from None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _preflight()
     await init_models()
-    log.info("MeetMind %s starting — env=%s, llm=%s", VERSION, settings.app_env, settings.llm_provider)
+    log.info(
+        "MeetMind %s starting — env=%s, llm=%s, transcription=%s, db=%s",
+        VERSION, settings.app_env, settings.llm_provider,
+        settings.transcription_provider, settings.postgres_host,
+    )
     if settings.is_production and settings.frontend_origin.startswith("http://"):
         log.warning("APP_ENV=production but FRONTEND_ORIGIN is not HTTPS. Cookies will not be secure.")
     yield

@@ -117,6 +117,28 @@ class Settings(BaseSettings):
     rate_limit_login_per_minute: int = 5
     rate_limit_upload_per_hour: int = 30
 
+    @field_validator(
+        "postgres_host", "postgres_db", "postgres_user", "postgres_password",
+        "jwt_secret", "encryption_key", "media_signing_secret",
+        "groq_api_key", "anthropic_api_key", "openai_api_key",
+        "ollama_base_url", "speaker_model_path",
+        mode="before",
+    )
+    @classmethod
+    def _strip_whitespace(cls, v):
+        """Trim stray whitespace and newlines from pasted values.
+
+        Not paranoia - this cost a failed deploy. Render's dashboard renders each
+        value in a multi-line textarea, so pasting a long hostname can carry an
+        invisible trailing newline. The result is
+        `socket.gaierror: [Errno -2] Name or service not known` at startup, which
+        points at DNS and gives no hint that the real problem is one character you
+        cannot see. The same trap applies to any key pasted from a terminal.
+        """
+        if isinstance(v, str):
+            return v.strip().strip('"').strip("'")
+        return v
+
     @field_validator("jwt_secret", "encryption_key", "media_signing_secret")
     @classmethod
     def _reject_placeholder_secrets(cls, v: str, info) -> str:
