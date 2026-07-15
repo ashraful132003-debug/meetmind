@@ -133,6 +133,30 @@ def get_model():
         return _model
 
 
+# Groq's Whisper reports the language as a full English name ("English", "Hindi")
+# while local faster-whisper reports an ISO code ("en", "hi"). The rest of the app
+# — the database column, the UI's language labels — expects the code. Without this
+# the UI would show "ENGLISH" instead of "English", and a meeting transcribed on
+# the server would be labelled differently from the identical meeting transcribed
+# locally.
+_LANGUAGE_CODES = {
+    "english": "en", "hindi": "hi", "urdu": "ur", "tamil": "ta", "telugu": "te",
+    "bengali": "bn", "marathi": "mr", "gujarati": "gu", "kannada": "kn",
+    "malayalam": "ml", "punjabi": "pa", "spanish": "es", "french": "fr",
+    "german": "de", "chinese": "zh", "japanese": "ja", "arabic": "ar",
+    "portuguese": "pt", "russian": "ru",
+}
+
+
+def _normalise_language(value: str | None) -> str | None:
+    if not value:
+        return None
+    v = value.strip().lower()
+    if len(v) <= 3:  # already a code
+        return v
+    return _LANGUAGE_CODES.get(v, v[:2])
+
+
 def _transcribe_groq(audio_path: str | Path, language: str | None = None) -> TranscriptionResult:
     """Transcribe via Groq's free Whisper endpoint.
 
@@ -202,7 +226,7 @@ def _transcribe_groq(audio_path: str | Path, language: str | None = None) -> Tra
     duration = float(payload.get("duration") or (segments[-1].end if segments else 0.0))
     return TranscriptionResult(
         segments=segments,
-        language=payload.get("language") or language or "en",
+        language=_normalise_language(payload.get("language")) or language or "en",
         duration=duration,
     )
 

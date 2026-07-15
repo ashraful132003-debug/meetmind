@@ -57,6 +57,18 @@ class Settings(BaseSettings):
     postgres_user: str = "meetmind"
     postgres_password: str
 
+    # Hosted Postgres (Neon, Supabase, Render) refuses non-TLS connections; the
+    # local portable server has no certificate and refuses TLS. So this cannot be
+    # hardcoded either way.
+    #
+    # "auto" does the right thing: TLS for anything that is not loopback. Getting
+    # this wrong is not a subtle failure - the app simply cannot reach its
+    # database, and the deploy dies at startup.
+    #   auto     TLS unless the host is localhost/127.0.0.1   <-- default
+    #   require  always TLS
+    #   disable  never TLS
+    postgres_ssl: str = "auto"
+
     # ollama (local, free, private) | groq (free tier, no card) | anthropic | openai
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -121,10 +133,26 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        # The password is URL-encoded: hosted providers generate passwords
+        # containing @ / : # and friends, any of which would silently corrupt the
+        # DSN and produce a baffling "could not translate host name" error.
+        from urllib.parse import quote
+
         return (
-            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
+            f"postgresql+asyncpg://{quote(self.postgres_user, safe='')}:"
+            f"{quote(self.postgres_password, safe='')}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def use_database_ssl(self) -> bool:
+        mode = self.postgres_ssl.lower()
+        if mode == "require":
+            return True
+        if mode == "disable":
+            return False
+        # auto: loopback is the local portable server, which has no TLS.
+        return self.postgres_host not in {"127.0.0.1", "localhost", "::1", ""}
 
     @property
     def media_path(self) -> Path:
