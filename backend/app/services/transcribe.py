@@ -133,8 +133,85 @@ def get_model():
         return _model
 
 
+def _transcribe_groq(audio_path: str | Path, language: str | None = None) -> TranscriptionResult:
+    """Transcribe via Groq's free Whisper endpoint.
+
+    This exists so the app can be DEPLOYED. Local Whisper needs ~2GB of RAM,
+    every free host gives 512MB, and Groq is the only free tier (no card) that
+    serves Whisper as well as a chat model.
+
+    The trade-off is real and must not be glossed over: in this mode the audio
+    leaves the machine. The privacy guarantee only holds with
+    TRANSCRIPTION_PROVIDER=local. See DEPLOY.md.
+    """
+    import httpx
+
+    if not settings.groq_api_key:
+        raise RuntimeError(
+            "TRANSCRIPTION_PROVIDER=groq but GROQ_API_KEY is empty. "
+            "Get a free key (no card) at https://console.groq.com/keys"
+        )
+
+    path = Path(audio_path)
+    try:
+        with path.open("rb") as f:
+            data = {
+                "model": settings.groq_whisper_model,
+                "response_format": "verbose_json",  # needed for segment timings
+                "timestamp_granularities[]": "segment",
+            }
+            if language:
+                data["language"] = language
+
+            r = httpx.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+                files={"file": (path.name, f, "application/octet-stream")},
+                data=data,
+                timeout=300.0,
+            )
+            r.raise_for_status()
+            payload = r.json()
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 413:
+            raise RuntimeError(
+                "Groq rejected the audio as too large (its free tier caps upload size). "
+                "Use a shorter recording, or switch to TRANSCRIPTION_PROVIDER=local."
+            ) from e
+        if e.response.status_code == 429:
+            raise RuntimeError("Groq rate limit reached. Wait a minute and retry.") from e
+        raise RuntimeError(f"Groq transcription failed ({e.response.status_code}): {e.response.text[:200]}") from e
+
+    segments: list[RawSegment] = []
+    for seg in payload.get("segments") or []:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        segments.append(
+            RawSegment(
+                start=float(seg.get("start", 0.0)),
+                end=float(seg.get("end", 0.0)),
+                text=text,
+                # Groq reports no_speech_prob rather than a confidence; invert it
+                # so the field means the same thing as on the local path.
+                confidence=round(1.0 - float(seg.get("no_speech_prob", 0.0)), 3),
+                words=[],
+            )
+        )
+
+    duration = float(payload.get("duration") or (segments[-1].end if segments else 0.0))
+    return TranscriptionResult(
+        segments=segments,
+        language=payload.get("language") or language or "en",
+        duration=duration,
+    )
+
+
 def transcribe(audio_path: str | Path, language: str | None = None) -> TranscriptionResult:
     """Blocking. Callers run this in a worker thread — never on the event loop."""
+    if settings.transcription_provider.lower() == "groq":
+        return _transcribe_groq(audio_path, language)
+
     model = get_model()
     segments_iter, info = model.transcribe(
         str(audio_path),

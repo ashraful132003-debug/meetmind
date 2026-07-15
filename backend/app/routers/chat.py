@@ -14,7 +14,7 @@ from ..models import ChatMessage, Meeting, TranscriptChunk
 from ..schemas import ChatMessageOut, ChatRequest, ChatResponse, Citation
 from ..security import decrypt_text, encrypt_text
 from ..services import rag
-from ..services.llm import LLMError, LLMUnavailable, embed
+from ..services.llm import LLMError, LLMUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +102,6 @@ async def ask(
     ]
 
     try:
-        query_vec = (await embed([payload.question]))[0]
         chunks = [
             {
                 "text": decrypt_text(c.text_enc),
@@ -113,7 +112,8 @@ async def ask(
             }
             for c in chunk_rows
         ]
-        retrieved = rag.rank_chunks(query_vec, chunks)
+        # Semantic when an embedding model is configured, BM25 otherwise.
+        retrieved = await rag.retrieve(payload.question, chunks)
         answer_text = await rag.answer_question(payload.question, retrieved, history_payload)
     except LLMUnavailable as e:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e

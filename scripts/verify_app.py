@@ -13,6 +13,7 @@ Run after seeding:  python scripts/verify_app.py
 from __future__ import annotations
 
 import sys
+import time
 
 import httpx
 
@@ -53,9 +54,21 @@ def main() -> int:
     with httpx.Client(timeout=180) as c:
         # --- Auth ------------------------------------------------------------
         section("Sign in")
+
+        # Login is rate limited to 5/minute per IP. Running security_check.py
+        # first (which deliberately hammers it) leaves the limiter warm, and this
+        # script would then fail for a reason that has nothing to do with what it
+        # is testing. Wait it out rather than report a misleading failure.
         r = c.post(f"{BASE}/api/auth/login", json={"email": EMAIL, "password": PASSWORD})
+        if r.status_code == 429:
+            wait = int(r.headers.get("Retry-After", "61")) + 1
+            print(f"  (rate limited - the limiter is working; waiting {wait}s)")
+            time.sleep(wait)
+            r = c.post(f"{BASE}/api/auth/login", json={"email": EMAIL, "password": PASSWORD})
+
         if not check("Demo account can sign in", r.status_code == 200, f"{r.status_code} {r.text[:120]}"):
-            print("\n  Run: python scripts/seed_meetings.py")
+            if r.status_code == 401:
+                print("\n  The demo account does not exist. Run: python scripts/seed_meetings.py")
             return 1
 
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}

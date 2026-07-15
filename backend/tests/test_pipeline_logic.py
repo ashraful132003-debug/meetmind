@@ -184,6 +184,53 @@ class TestRanking:
         assert all(np.isfinite(c["score"]) for c in ranked)
 
 
+class TestBM25:
+    """Retrieval with no embedding model.
+
+    This is a real deployment shape, not a fallback nobody uses: Groq is the only
+    free tier (no card) that also serves Whisper, and it has no embeddings
+    endpoint, while a 512MB host cannot run Ollama.
+    """
+
+    CHUNKS = [
+        {"text": "[00:05] Rahul: I hit a problem with the auth layer token refresh yesterday."},
+        {"text": "[00:20] Priya: Can you have the dashboard ready for review by Thursday?"},
+        {"text": "[00:40] Sneha: I will do the CSV export, it is mostly frontend anyway."},
+        {"text": "[01:00] Priya: I will raise the staging memory issue with infra today."},
+    ]
+
+    def test_finds_the_relevant_chunk(self):
+        out = rag.bm25_rank("what was the problem with token refresh", self.CHUNKS)
+        assert out
+        assert "token refresh" in out[0]["text"]
+
+    def test_ranks_by_relevance(self):
+        out = rag.bm25_rank("CSV export", self.CHUNKS)
+        assert "CSV export" in out[0]["text"]
+
+    def test_returns_nothing_for_unrelated_query(self):
+        assert rag.bm25_rank("quantum entanglement of penguins", self.CHUNKS) == []
+
+    def test_respects_top_k(self):
+        out = rag.bm25_rank("the", self.CHUNKS, top_k=2)
+        assert len(out) <= 2
+
+    def test_scores_are_attached_and_descending(self):
+        out = rag.bm25_rank("staging memory issue infra", self.CHUNKS)
+        assert out
+        assert all("score" in c for c in out)
+        assert out == sorted(out, key=lambda c: -c["score"])
+
+    def test_empty_inputs(self):
+        assert rag.bm25_rank("anything", []) == []
+        assert rag.bm25_rank("", self.CHUNKS) == []
+
+    def test_rare_terms_beat_common_ones(self):
+        """A word appearing in every chunk carries no information; a rare one does."""
+        out = rag.bm25_rank("Priya dashboard", self.CHUNKS)
+        assert "dashboard" in out[0]["text"]
+
+
 class TestTimestampParsing:
     def test_parses_mm_ss_and_hh_mm_ss(self):
         assert analysis._parse_ts("01:30") == 90

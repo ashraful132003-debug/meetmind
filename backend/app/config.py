@@ -4,13 +4,23 @@ Nothing here is ever exposed to the frontend. Values that would be unsafe to
 default (secrets) fail loudly in production rather than falling back.
 """
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+# Where relative paths (storage, outbox, static, .env) resolve from.
+#
+# Locally the layout is <repo>/backend/app/config.py, so parents[2] is the repo
+# root and everything works. In the Docker image the layout is /app/app/config.py
+# — parents[2] is "/", and the app would then try to write /storage/media, which
+# does not exist and which the non-root user cannot create. The container would
+# die on the first upload, after a green deploy.
+#
+# So it is explicit rather than inferred: the Dockerfile sets APP_BASE_DIR=/app.
+BASE_DIR = Path(os.getenv("APP_BASE_DIR") or Path(__file__).resolve().parents[2])
 
 _PLACEHOLDERS = {
     "change-me-to-a-long-random-string",
@@ -47,6 +57,7 @@ class Settings(BaseSettings):
     postgres_user: str = "meetmind"
     postgres_password: str
 
+    # ollama (local, free, private) | groq (free tier, no card) | anthropic | openai
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_chat_model: str = "llama3.2:3b"
@@ -55,6 +66,20 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-5"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+
+    # Groq exists here for one reason: it is the only provider with a genuinely
+    # free tier (no card) that serves BOTH a chat model and Whisper. That makes a
+    # real deployment possible on a 512MB host, which cannot run the local models.
+    groq_api_key: str = ""
+    groq_chat_model: str = "llama-3.3-70b-versatile"
+    groq_whisper_model: str = "whisper-large-v3-turbo"
+
+    # local (private, needs ~2GB RAM) | groq (free tier, audio leaves the machine)
+    transcription_provider: str = "local"
+
+    # ollama (local) | none -> falls back to BM25 lexical retrieval, which needs
+    # no model at all and is perfectly good for searching one meeting.
+    embedding_provider: str = "ollama"
 
     whisper_model: str = "small"
     whisper_device: str = "auto"

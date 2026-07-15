@@ -61,8 +61,13 @@ ENV SPEAKER_MODEL_PATH=/app/models/wespeaker.onnx
 
 USER meetmind
 
+# APP_BASE_DIR is load-bearing. config.py otherwise infers the base directory
+# from its own location - /app/app/config.py here, which gives "/" - and the app
+# would try to write /storage/media as a non-root user. Green deploy, then death
+# on the first upload.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    APP_BASE_DIR=/app \
     HF_HOME=/app/storage/models
 
 EXPOSE 8000

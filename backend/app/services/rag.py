@@ -15,6 +15,7 @@ Why this is grounded rather than guessy:
 from __future__ import annotations
 
 import logging
+import math
 import re
 
 import numpy as np
@@ -149,12 +150,85 @@ def build_chunks(utterances: list, speaker_names: dict[str, str] | None = None) 
 
 
 async def embed_chunks(chunks: list[dict]) -> list[dict]:
-    if not chunks:
-        return []
+    """Attach embeddings when a model is available.
+
+    Without one, chunks are stored with embedding=None and retrieval uses BM25.
+    Indexing must not fail just because the deployment has no embedding provider.
+    """
+    from .llm import embeddings_available
+
+    if not chunks or not embeddings_available():
+        return chunks
+
     vectors = await embed([c["text"] for c in chunks])
     for chunk, vec in zip(chunks, vectors):
         chunk["embedding"] = vec
     return chunks
+
+
+_TOKEN_RE = re.compile(r"[a-z0-9']+")
+_BM25_K1 = 1.5
+_BM25_B = 0.75
+
+
+def _tokenize(text: str) -> list[str]:
+    return _TOKEN_RE.findall(text.lower())
+
+
+def bm25_rank(query: str, chunks: list[dict], top_k: int = TOP_K) -> list[dict]:
+    """Lexical retrieval, no model required.
+
+    Used when no embedding provider is configured — which is a real deployment
+    shape, not a degraded one: Groq is the only free-tier provider that also
+    serves Whisper, and it has no embeddings endpoint, while a 512MB host cannot
+    run Ollama.
+
+    BM25 is a genuinely strong baseline for this job. Searching ONE meeting means
+    the vocabulary is tiny and the user's question usually reuses words that were
+    actually said ("what did Rahul say about the deadline"). Semantic search wins
+    on paraphrase, which is why embeddings stay the default when available.
+    """
+    if not chunks:
+        return []
+
+    q_terms = _tokenize(query)
+    if not q_terms:
+        return []
+
+    docs = [_tokenize(c["text"]) for c in chunks]
+    lengths = np.array([len(d) for d in docs], dtype=np.float32)
+    avg_len = float(lengths.mean()) or 1.0
+    n = len(docs)
+
+    scores = np.zeros(n, dtype=np.float32)
+    for term in set(q_terms):
+        # How many documents contain this term at all.
+        df = sum(1 for d in docs if term in d)
+        if df == 0:
+            continue
+        # Rare terms are informative; terms in every chunk are not.
+        idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
+        for i, doc in enumerate(docs):
+            tf = doc.count(term)
+            if tf == 0:
+                continue
+            norm = tf * (_BM25_K1 + 1) / (
+                tf + _BM25_K1 * (1 - _BM25_B + _BM25_B * lengths[i] / avg_len)
+            )
+            scores[i] += idf * norm
+
+    if not scores.any():
+        return []
+
+    order = np.argsort(-scores)[:top_k]
+    out = []
+    for i in order:
+        if scores[int(i)] <= 0:
+            continue
+        chunk = dict(chunks[int(i)])
+        chunk["score"] = float(scores[int(i)])
+        out.append(chunk)
+    return out
 
 
 def rank_chunks(query_vec: list[float], chunks: list[dict], top_k: int = TOP_K) -> list[dict]:
@@ -181,6 +255,21 @@ def rank_chunks(query_vec: list[float], chunks: list[dict], top_k: int = TOP_K) 
         chunk["score"] = float(scores[int(i)])
         out.append(chunk)
     return out
+
+
+async def retrieve(question: str, chunks: list[dict], top_k: int = TOP_K) -> list[dict]:
+    """Pick the best retrieval available: semantic when there is an embedding
+    model, lexical otherwise. Callers do not need to know which ran."""
+    from .llm import embed, embeddings_available
+
+    if embeddings_available() and any(c.get("embedding") for c in chunks):
+        query_vec = (await embed([question]))[0]
+        ranked = rank_chunks(query_vec, chunks, top_k)
+        if ranked:
+            return ranked
+        # An embedding search that returns nothing is odd; fall through rather
+        # than tell the user their meeting has no relevant content.
+    return bm25_rank(question, chunks, top_k)
 
 
 CHAT_SYSTEM = """You answer questions about ONE specific meeting, using ONLY the transcript excerpts provided.

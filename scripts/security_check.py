@@ -37,6 +37,16 @@ def section(title: str) -> None:
     print("-" * len(title))
 
 
+class RateLimited(RuntimeError):
+    """The registration limiter blocked us.
+
+    Not a failure of the app - it is the limiter doing its job. But this suite
+    creates several accounts per run, so a few runs in one hour will legitimately
+    exhaust the quota and every subsequent check would report a misleading
+    failure. Better to stop and say so plainly.
+    """
+
+
 def make_user(client: httpx.Client) -> tuple[str, str, str]:
     email = f"probe-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Str0ng-{secrets.token_urlsafe(12)}"
@@ -44,6 +54,8 @@ def make_user(client: httpx.Client) -> tuple[str, str, str]:
         f"{BASE}/api/auth/register",
         json={"email": email, "full_name": "Probe User", "password": password},
     )
+    if r.status_code == 429:
+        raise RateLimited()
     r.raise_for_status()
     return email, password, r.json()["access_token"]
 
@@ -98,6 +110,8 @@ def main() -> int:
                 f"{BASE}/api/auth/register",
                 json={"email": f"weak-{uuid.uuid4().hex[:8]}@example.com", "full_name": "Weak", "password": weak},
             )
+            if r.status_code == 429:
+                raise RateLimited()
             check(f"Weak password rejected ({why})", r.status_code == 422, f"got {r.status_code}")
 
     # --- Login hygiene -------------------------------------------------------
@@ -287,6 +301,70 @@ def main() -> int:
 
         alice_c.delete(f"{BASE}/api/meetings/{meeting_id}", headers=alice_h)
 
+    # --- Static/SPA serving --------------------------------------------------
+    # Only meaningful in the single-image production deployment, where FastAPI
+    # serves the built SPA itself. Skipped in dev, where Vite serves it.
+    with httpx.Client(timeout=30) as c:
+        spa = c.get(f"{BASE}/")
+        if spa.status_code == 200 and "<!doctype html" in spa.text.lower():
+            section("SPA serving (production single-image mode)")
+
+            check("Client-side routes fall back to index.html",
+                  c.get(f"{BASE}/meetings").status_code == 200)
+
+            r = c.get(f"{BASE}/api/definitely-not-a-real-route")
+            check(
+                "Unknown /api/* 404s as JSON rather than falling through to HTML",
+                r.status_code == 404 and "<!doctype" not in r.text.lower(),
+                f"{r.status_code}: {r.text[:60]}",
+            )
+
+            # The SPA handler resolves user-supplied paths against the static
+            # directory. If that resolution is not constrained, ".." walks out to
+            # .env and hands an attacker every secret in the app.
+            leaked = []
+            for path in ["/../.env", "/..%2F.env", "/%2e%2e/.env", "/static/../.env",
+                         "/assets/../../.env", "/.env", "/../backend/app/config.py"]:
+                try:
+                    body = c.get(f"{BASE}{path}").text
+                except Exception:
+                    continue
+                if any(k in body for k in ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD")):
+                    leaked.append(path)
+            check(
+                "Path traversal cannot read .env through the SPA route",
+                not leaked,
+                f"LEAKED via: {leaked}",
+            )
+
+            # The CSP has to differ between the API and the page. Get this wrong
+            # and the deployed site is a blank white page with the explanation
+            # only in the browser console - no command-line check catches it,
+            # because curl does not enforce CSP.
+            page_csp = spa.headers.get("Content-Security-Policy", "")
+            check(
+                "SPA page CSP allows its own scripts (or the site renders blank)",
+                "script-src 'self'" in page_csp,
+                f"CSP was: {page_csp[:90]}",
+            )
+            check(
+                "SPA page CSP still forbids inline scripts (XSS defence intact)",
+                "'unsafe-inline'" not in page_csp.split("style-src")[0],
+                f"script-src allows inline: {page_csp[:90]}",
+            )
+            check(
+                "SPA page CSP forbids third-party connections (privacy claim enforced)",
+                "connect-src 'self'" in page_csp,
+                f"CSP was: {page_csp[:90]}",
+            )
+
+            api_csp = c.get(f"{BASE}/api/health").headers.get("Content-Security-Policy", "")
+            check(
+                "API CSP stays locked to default-src 'none'",
+                "default-src 'none'" in api_csp,
+                f"CSP was: {api_csp[:90]}",
+            )
+
     # --- Security headers ----------------------------------------------------
     section("Security headers")
 
@@ -325,4 +403,19 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except RateLimited:
+        print("\n" + "=" * 60)
+        print("  STOPPED: the registration rate limiter blocked this run.")
+        print("=" * 60)
+        print("  This is the app working correctly, not a bug - registration is")
+        print("  capped at 20/hour per IP, and this suite creates several accounts")
+        print("  each run.")
+        print()
+        print("  To run again now, restart the backend (the limiter is in-process,")
+        print("  so a restart clears it):")
+        print("    .\\start.ps1 -Stop  ;  .\\start.ps1")
+        print()
+        print("  Or just wait an hour.")
+        sys.exit(2)

@@ -7,19 +7,48 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from .config import settings
+from .config import BASE_DIR, settings
 from .db import engine, init_models
 from .routers import analytics, auth, chat, email, meetings
 from .schemas import HealthResponse
 from .services.llm import health as llm_health
 
 VERSION = "1.0.0"
+
+# Nothing may load anything. Correct for JSON and media responses.
+API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+
+# What the SPA actually needs, and not one directive more:
+#   script-src 'self'        - our bundle only. NOT 'unsafe-inline': an injected
+#                              <script> must never execute, which is the whole
+#                              point of having a CSP on a page that renders
+#                              user-supplied meeting text.
+#   style-src 'unsafe-inline'- React's style={{...}} prop emits inline styles.
+#                              Unavoidable without a nonce pipeline; inline CSS is
+#                              a far smaller risk than inline JS.
+#   connect-src 'self'       - the frontend is forbidden from talking to any third
+#                              party. This enforces the privacy claim in the
+#                              browser itself rather than on trust.
+#   media-src 'self' blob:   - blob: is needed for the recorder's local playback.
+SPA_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "img-src 'self' data:; "
+    "media-src 'self' blob:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'; "
+    "form-action 'self'"
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,11 +113,23 @@ async def security_and_logging(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(self)"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    # The API only ever returns JSON, media, or the sandboxed email preview —
-    # so it can afford the strictest possible CSP.
-    response.headers.setdefault(
-        "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-    )
+
+    # Two different policies, because this app serves two different things.
+    #
+    # The API returns JSON, media, or the sandboxed email preview, so it gets the
+    # strictest possible policy: load nothing, ever.
+    #
+    # The SPA cannot live under that policy - `default-src 'none'` blocks its own
+    # JavaScript and CSS, and the page renders completely blank with no error
+    # anywhere except the browser console. curl does not enforce CSP, so this is
+    # invisible to every command-line check; it only appears in a real browser,
+    # in production. Hence the split.
+    if not response.headers.get("Content-Security-Policy"):
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("text/html"):
+            response.headers["Content-Security-Policy"] = SPA_CSP
+        else:
+            response.headers["Content-Security-Policy"] = API_CSP
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
@@ -120,6 +161,50 @@ app.include_router(analytics.router)
 app.include_router(email.router)
 
 
+def _mount_spa() -> None:
+    """Serve the built frontend from this same app, when it exists.
+
+    In development the SPA is served by Vite on :5173 and proxied here, so this
+    does nothing. In production (one Docker image, one free instance) the built
+    assets sit in ./static and FastAPI serves them.
+
+    Same-origin is the point, not a convenience: it means no CORS at all, and the
+    refresh cookie stays SameSite=Lax without any cross-site exemption. A
+    two-service deployment would need both, and would burn a second free instance.
+    """
+    static_dir = BASE_DIR / "static"
+    index = static_dir / "index.html"
+    if not index.exists():
+        log.info("No built frontend at %s — API-only mode (fine in development)", static_dir)
+        return
+
+    assets = static_dir / "assets"
+    if assets.is_dir():
+        # Hashed filenames are content-addressed, so they can be cached forever.
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str) -> Response:
+        # Never let an unknown /api/* path fall through to index.html - that would
+        # turn a typo'd endpoint into a confusing 200 with HTML in it.
+        if full_path.startswith("api/"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+
+        candidate = (static_dir / full_path).resolve()
+        # Path traversal guard: only serve files genuinely inside static_dir.
+        if (
+            full_path
+            and candidate.is_file()
+            and candidate.is_relative_to(static_dir.resolve())
+        ):
+            return FileResponse(candidate)
+
+        # Everything else is a client-side route; React Router will handle it.
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+    log.info("Serving the built frontend from %s", static_dir)
+
+
 @app.get("/api/health", response_model=HealthResponse, tags=["system"])
 async def health() -> HealthResponse:
     """Real health, not a hardcoded 200. The UI uses this to tell the user
@@ -142,3 +227,9 @@ async def health() -> HealthResponse:
         whisper_model=settings.whisper_model,
         version=VERSION,
     )
+
+
+# MUST be last. The SPA handler registers a catch-all GET /{full_path:path}, and
+# FastAPI matches routes in definition order - mounting it any earlier would
+# shadow every API route defined after it.
+_mount_spa()

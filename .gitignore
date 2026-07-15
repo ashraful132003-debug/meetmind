@@ -30,3 +30,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Built SPA copied here for the single-image production build
+/static/

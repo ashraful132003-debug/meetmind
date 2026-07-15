@@ -1,0 +1,104 @@
+# Render blueprint - free tier deployment.
+#
+# Render reads this automatically when you connect the repo, so most of the
+# configuration below never has to be clicked through by hand.
+#
+# WHY THIS CONFIG LOOKS DIFFERENT FROM LOCAL:
+# A free instance has 512MB of RAM. Whisper needs ~2GB and Llama 3.2 needs ~3GB,
+# so the local models cannot run here - no amount of configuration fixes that.
+# Instead this uses Groq's free tier (no credit card) for both transcription and
+# the language model, which leaves the instance doing only web serving,
+# diarization (a 25MB ONNX model) and BM25 retrieval. That fits.
+#
+# THE TRADE-OFF, STATED PLAINLY:
+# In this mode, audio and transcripts are sent to Groq. The "nothing leaves your
+# machine" guarantee holds for the LOCAL setup only. Say so if asked - the
+# distinction is the interesting part of the project, not something to hide.
+#
+# Database: Render's free Postgres expires after 90 days. Neon's free tier does
+# not, so DATABASE_* below is left for you to point at Neon. See DEPLOY.md.
+
+services:
+  - type: web
+    name: meetmind
+    runtime: docker
+    plan: free
+    region: singapore          # closest free region to India; change if you like
+    # Root Dockerfile: builds the React SPA and serves it from the same FastAPI
+    # process. One instance, same origin, no CORS. (backend/Dockerfile is the
+    # API-only image used by docker-compose, where nginx serves the SPA instead.)
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: APP_ENV
+        value: production
+
+      # --- Secrets: generated once by Render, never committed ---------------
+      # generateValue creates a strong random value on first deploy and keeps it.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MEDIA_SIGNING_SECRET
+        generateValue: true
+
+      # ENCRYPTION_KEY must be a Fernet key (44-char base64), which generateValue
+      # cannot produce - it has to be a specific format. Set it manually ONCE:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # WARNING: changing it later makes every stored transcript permanently
+      # unreadable. There is no recovery. Back it up.
+      - key: ENCRYPTION_KEY
+        sync: false
+
+      # --- Database ---------------------------------------------------------
+      # Paste your Neon connection details in the Render dashboard.
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        value: "5432"
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+
+      # --- AI: Groq free tier ----------------------------------------------
+      - key: LLM_PROVIDER
+        value: groq
+      - key: TRANSCRIPTION_PROVIDER
+        value: groq
+      - key: EMBEDDING_PROVIDER
+        value: none            # Groq has no embeddings endpoint -> BM25 retrieval
+      - key: GROQ_API_KEY
+        sync: false            # paste it in the dashboard; never commit a key
+      - key: GROQ_CHAT_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GROQ_WHISPER_MODEL
+        value: whisper-large-v3-turbo
+
+      # Diarization still runs on the instance - it is only a 25MB ONNX model.
+      - key: SPEAKER_MODEL_PATH
+        value: /app/models/wespeaker.onnx
+
+      # --- Limits -----------------------------------------------------------
+      # Groq's free tier caps upload size, and a 512MB box cannot buffer much
+      # anyway. Smaller than the local 200MB limit, deliberately.
+      - key: MAX_UPLOAD_MB
+        value: "24"
+
+      - key: EMAIL_TRANSPORT
+        value: local
+
+      # Same origin: the API serves the built SPA, so no CORS and the refresh
+      # cookie stays SameSite. Render injects the real URL here.
+      - key: FRONTEND_ORIGIN
+        fromService:
+          type: web
+          name: meetmind
+          property: host
+
+    # Free instances have no persistent disk. Uploaded audio therefore lives only
+    # as long as the container - the transcript and summary survive in Postgres,
+    # but the recording itself will disappear on restart. Acceptable for a demo;
+    # stated here so it is not a surprise.
