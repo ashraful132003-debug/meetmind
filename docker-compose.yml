@@ -1,0 +1,109 @@
+# Full stack: Postgres + Ollama + API + nginx-served SPA.
+#
+# Usage:
+#   python scripts/bootstrap_env.py      # generate .env with real secrets first
+#   docker compose up -d --build
+#   docker compose exec ollama ollama pull llama3.2:3b
+#   docker compose exec ollama ollama pull all-minilm
+#   open http://localhost:8080
+#
+# RAM: Whisper small + Llama 3.2 3B need roughly 6GB. This will not fit a 512MB
+# free tier - see DEPLOY.md for the hosted-LLM configuration that does.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-meetmind}
+      POSTGRES_USER: ${POSTGRES_USER:-meetmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set - run scripts/bootstrap_env.py}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No ports published. The database is reachable only from the compose
+    # network, never from the host or the internet.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meetmind} -d ${POSTGRES_DB:-meetmind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    # Also unpublished: only the API talks to the model server.
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Uncomment to use an NVIDIA GPU (needs nvidia-container-toolkit on the host):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      APP_ENV: production
+      # Inside the network these resolve to the service names, not localhost.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-meetmind}
+      POSTGRES_USER: ${POSTGRES_USER:-meetmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      OLLAMA_BASE_URL: http://ollama:11434
+      # These must come from .env - the app refuses to start on placeholders.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY}
+      MEDIA_SIGNING_SECRET: ${MEDIA_SIGNING_SECRET:?set MEDIA_SIGNING_SECRET}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-llama3.2:3b}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-all-minilm}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-local}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Same origin as the SPA, because nginx proxies /api.
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+    volumes:
+      - media:/app/storage
+      - outbox:/app/outbox
+    # Not published either. nginx is the only way in.
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
+  media:
+  outbox:
+  ollama:

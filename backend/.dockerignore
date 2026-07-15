@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Secrets must never end up in an image layer.
+.env
+.env.*
+
+# Local runtime data
+storage/
+outbox/
+*.log

@@ -1,0 +1,38 @@
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- Config ---
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0
+
+# --- Database ---
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+greenlet==3.1.1
+
+# --- Security ---
+argon2-cffi==23.1.0
+pyjwt==2.10.1
+cryptography==44.0.0
+
+# --- Speech-to-text ---
+# faster-whisper runs on CTranslate2, NOT PyTorch. Deliberately no torch here:
+# it would add ~2.5GB for functionality this project does not use.
+faster-whisper==1.1.1
+# faster-whisper imports `requests` in utils.py but does not declare it as a
+# dependency, so it must be pinned here or the import fails at runtime.
+requests==2.32.3
+
+# --- Analysis / retrieval ---
+httpx==0.28.1
+numpy==2.2.1
+
+# --- Media ---
+pydub==0.25.1
+
+# --- Dev / test ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
