@@ -16,7 +16,8 @@ import uuid
 
 import httpx
 
-BASE = "http://127.0.0.1:8000"
+import os
+BASE = os.getenv("BASE", "http://127.0.0.1:8000")
 
 passed = 0
 failed = 0
@@ -149,10 +150,27 @@ def main() -> int:
         check("Refresh token is rotated (new value issued)", first_cookie != second_cookie)
 
         # Replay the OLD token - this simulates a stolen cookie being reused.
+        #
+        # The cookie domain must match whatever BASE points at. It used to be
+        # hardcoded to 127.0.0.1, which meant that against a deployed URL the
+        # attacker's cookie was never sent at all: the replay silently became an
+        # unauthenticated request, "rejected" for the wrong reason, and the
+        # reuse-detection check that follows then failed. A test that passes
+        # because it never ran the attack is worse than no test.
+        from urllib.parse import urlparse
+
+        cookie_domain = urlparse(BASE).hostname or "127.0.0.1"
+
         with httpx.Client(timeout=30) as attacker:
-            attacker.cookies.set("meetmind_refresh", first_cookie or "", domain="127.0.0.1")
+            attacker.cookies.set("meetmind_refresh", first_cookie or "", domain=cookie_domain)
             r = attacker.post(f"{BASE}/api/auth/refresh")
-            check("Replaying a rotated refresh token is rejected", r.status_code == 401, f"got {r.status_code}")
+            sent = "meetmind_refresh" in attacker.cookies
+            check(
+                "Replaying a rotated refresh token is rejected",
+                r.status_code == 401 and sent,
+                f"got {r.status_code}"
+                + ("" if sent else " - cookie was never sent, so no replay actually happened"),
+            )
 
         # After detected reuse, the legitimate session must also be dead.
         r = c.post(f"{BASE}/api/auth/refresh")
@@ -291,10 +309,22 @@ def main() -> int:
             files={"file": ("../../../escape.wav", wav, "audio/wav")},
             data={"title": "traversal", "source": "upload"},
         )
+        # Two acceptable outcomes, and the distinction matters:
+        #
+        #  201 - the request reached the app, which ignored the client's filename
+        #        and stored the file under a generated name. This is what happens
+        #        locally, and it is the app's own defence.
+        #  403 - a WAF in front (Cloudflare, on Render) rejected the traversal
+        #        pattern before it ever reached the app. Also fine: defence in
+        #        depth. Identifiable because our X-Request-ID middleware never ran.
+        #
+        # A 500, or a 201 whose file landed outside storage, would be the failure.
+        blocked_at_edge = r.status_code == 403 and "X-Request-ID" not in r.headers
         check(
-            "Path-traversal filename does not escape storage",
-            r.status_code == 201,
-            f"got {r.status_code} - should be accepted but stored under a generated name",
+            "Path-traversal filename cannot escape storage",
+            r.status_code == 201 or blocked_at_edge,
+            f"got {r.status_code}"
+            + (" (blocked upstream by the host's WAF)" if blocked_at_edge else ""),
         )
         if r.status_code == 201:
             alice_c.delete(f"{BASE}/api/meetings/{r.json()['id']}", headers=alice_h)
