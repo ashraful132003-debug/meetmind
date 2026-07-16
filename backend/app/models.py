@@ -221,20 +221,45 @@ class ActionItem(Base):
 
 
 class ChatMessage(Base):
+    """Chat messages at two scopes, in one table.
+
+    * meeting_id set  -> a conversation about that one meeting.
+    * meeting_id NULL -> a workspace conversation spanning every meeting the user
+                         owns ("what did the client say about pricing last month").
+
+    One table rather than two because the rows are identical in shape and both
+    need the same encryption, retention and deletion rules. `user_id` is stored
+    directly instead of being reached through the meeting, because a workspace
+    message has no meeting to reach through — and it keeps the ownership filter a
+    single indexed column either way.
+    """
+
     __tablename__ = "chat_messages"
 
     id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    meeting_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=True, index=True
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content_enc: Mapped[str] = mapped_column(Text, nullable=False)
     citations: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
-    meeting: Mapped[Meeting] = relationship(back_populates="chat_messages")
+    meeting: Mapped[Meeting | None] = relationship(back_populates="chat_messages")
 
-    __table_args__ = (CheckConstraint("role IN ('user','assistant')", name="ck_chat_role"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('user','assistant')", name="ck_chat_role"),
+        # Every row must be reachable by exactly one ownership path. Without this,
+        # a row with both columns NULL would be orphaned and unreachable — visible
+        # to nobody, deletable by nobody, and still holding meeting content.
+        CheckConstraint(
+            "meeting_id IS NOT NULL OR user_id IS NOT NULL", name="ck_chat_has_owner"
+        ),
+        Index("ix_chat_user_workspace", "user_id", "created_at"),
+    )
 
 
 class EmailDelivery(Base):

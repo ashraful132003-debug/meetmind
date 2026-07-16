@@ -38,7 +38,12 @@ line of config away if you ever want it.
 | **Identify speakers** | Voice-fingerprint clustering. Labels are editable — no diarizer is perfect |
 | **Summarise** | Overview, key points, decisions, and risks — grounded in the transcript |
 | **Extract action items** | Task, owner, deadline, priority, and the timestamp it was said |
-| **Ask the meeting** | RAG chatbot. Every answer cites timestamps you can click to verify |
+| **Ask the meeting** | RAG chatbot over one meeting. Every answer cites timestamps you can click to verify |
+| **Ask ALL your meetings** | Cross-meeting memory: "what did the client say about pricing last week?" Understands time expressions, names the meeting, and **every quote is verified against the transcript it's attributed to before you see it** |
+| **Unified task board** | Every action item from every meeting in one list, filterable by owner and state |
+| **AI follow-up email** | Drafts the email you'd send after the meeting, in four tones, grounded in what was actually said |
+| **Export** | Real PDF and Word files, generated server-side from the data — not a screenshot of the page |
+| **WhatsApp share** | Opens WhatsApp with the summary and open actions pre-filled. No Business API, no cost |
 | **Analytics** | Talk-time share, participation balance, words per minute, topics, timeline |
 | **Email the summary** | Renders a real MIME email. Captures locally by default; real SMTP is one config flip |
 | **Hindi + English** | Whisper handles code-switching mid-sentence, which is how meetings here actually sound |
@@ -168,6 +173,40 @@ To enable GPU acceleration:
 ```bash
 pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 ```
+
+---
+
+## Cross-meeting memory, and why it verifies itself
+
+"What did the client say about pricing last week?" is a harder question than it
+looks. The answer must name the *right* meeting — quoting a real line but
+attributing it to the wrong client is worse than saying "I don't know", because
+the user acts on it.
+
+Measured on Llama 3.2 3B (`scripts/tune_memory.py`), the model got this wrong
+about **half the time**. It quoted real lines and credited the wrong meeting, and
+it invented friendlier titles — "Acme pricing call" for a meeting actually named
+"Acme Salesforce integration - scope call".
+
+Prompting alone did not fix it. So the model is not trusted:
+
+1. It must return each source as `{meeting: N, quote: "..."}`, quoted verbatim.
+2. **Every quote is then looked up in the text of the meeting it names.**
+3. Anything that fails — a quote from a different meeting, a fabricated quote, a
+   meeting number that doesn't exist — is dropped before the user sees it.
+
+| | Before | After |
+|---|---|---|
+| Citation accuracy | — | **85.7%** (6/7) |
+| **Wrong meeting cited** | ~50% of answers | **0** |
+
+The remaining failure is retrieval (one question where the right chunk wasn't
+surfaced), not attribution. A citation shown in the UI is a checked fact about
+the transcript, not a claim by a language model.
+
+The same idea, stated generally: **the model proposes, the code verifies.** It is
+also why action-item timestamps are located by searching the transcript rather
+than trusting the model's guess.
 
 ---
 

@@ -4,6 +4,7 @@ import AnalyticsPanel from '../components/AnalyticsPanel'
 import AudioPlayer, { type AudioPlayerHandle } from '../components/AudioPlayer'
 import ChatPanel from '../components/ChatPanel'
 import EmailPanel from '../components/EmailPanel'
+import ExportPanel from '../components/ExportPanel'
 import SummaryPanel from '../components/SummaryPanel'
 import TranscriptPanel from '../components/TranscriptPanel'
 import { useToast } from '../context/ToastContext'
@@ -14,6 +15,7 @@ import {
   IconChart,
   IconChat,
   IconEdit,
+  IconFile,
   IconMail,
   IconRefresh,
   IconSparkle,
@@ -21,7 +23,7 @@ import {
   IconUsers,
 } from '../components/Icons'
 
-type Tab = 'summary' | 'transcript' | 'ask' | 'analytics' | 'share'
+type Tab = 'summary' | 'transcript' | 'ask' | 'analytics' | 'share' | 'export'
 
 const STAGES = ['uploaded', 'transcribing', 'diarizing', 'analyzing', 'indexing'] as const
 
@@ -238,7 +240,8 @@ export default function MeetingDetailPage() {
     { key: 'transcript', label: 'Transcript', icon: IconUsers },
     { key: 'ask', label: 'Ask', icon: IconChat },
     { key: 'analytics', label: 'Analytics', icon: IconChart },
-    { key: 'share', label: 'Share', icon: IconMail },
+    { key: 'share', label: 'Email', icon: IconMail },
+    { key: 'export', label: 'Export', icon: IconFile },
   ]
 
   return (
@@ -379,6 +382,7 @@ export default function MeetingDetailPage() {
               <AnalyticsPanel meetingId={meeting.id} currentTime={currentTime} onSeek={seek} />
             )}
             {tab === 'share' && <EmailPanel meetingId={meeting.id} ready={ready} />}
+            {tab === 'export' && <ExportPanel meeting={meeting} />}
           </div>
         </>
       )}

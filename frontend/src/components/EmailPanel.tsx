@@ -2,12 +2,19 @@ import { useEffect, useState } from 'react'
 import { useToast } from '../context/ToastContext'
 import { ApiError, api, type EmailDelivery } from '../lib/api'
 import { formatRelativeTime } from '../lib/format'
-import { IconAlert, IconCheckCircle, IconMail, IconSend, IconX } from './Icons'
+import { IconAlert, IconCheckCircle, IconMail, IconSend, IconSparkle, IconX } from './Icons'
 
 interface Props {
   meetingId: string
   ready: boolean
 }
+
+const TONES = [
+  { key: 'professional', label: 'Professional' },
+  { key: 'friendly', label: 'Friendly' },
+  { key: 'brief', label: 'Brief' },
+  { key: 'formal', label: 'Formal' },
+]
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -21,6 +28,24 @@ export default function EmailPanel({ meetingId, ready }: Props) {
   const [sending, setSending] = useState(false)
   const [history, setHistory] = useState<EmailDelivery[]>([])
   const [error, setError] = useState('')
+  const [drafting, setDrafting] = useState(false)
+  const [tone, setTone] = useState('professional')
+
+  const draftWithAI = async () => {
+    setDrafting(true)
+    try {
+      const draft = await api.draftFollowUp(meetingId, tone)
+      // The draft goes into the note field, which the email template already
+      // renders at the top — so the AI's words become the email's opening, above
+      // the generated summary, exactly where a human would write them.
+      setNote(draft.body)
+      toast.success('Draft written. Edit it as you like before sending.')
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Could not draft the email.')
+    } finally {
+      setDrafting(false)
+    }
+  }
 
   const loadHistory = async () => {
     try {
@@ -185,19 +210,51 @@ export default function EmailPanel({ meetingId, ready }: Props) {
         </div>
 
         <div className="field">
-          <label className="label" htmlFor="note">
-            Personal note <span style={{ color: 'var(--text-quaternary)', fontWeight: 400 }}>(optional)</span>
-          </label>
+          <div className="row gap-2 wrap" style={{ justifyContent: 'space-between' }}>
+            <label className="label" htmlFor="note">
+              Message <span style={{ color: 'var(--text-quaternary)', fontWeight: 400 }}>(optional)</span>
+            </label>
+
+            <div className="row gap-1">
+              <select
+                value={tone}
+                onChange={(e) => setTone(e.target.value)}
+                disabled={drafting || sending}
+                className="input"
+                style={{ height: 27, padding: '0 6px', fontSize: 11.5, width: 'auto' }}
+                aria-label="Tone"
+              >
+                {TONES.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={draftWithAI}
+                disabled={drafting || sending}
+                title="Let the AI write the follow-up, grounded in what was actually said"
+              >
+                {drafting ? <span className="spinner" /> : <IconSparkle size={12} />}
+                {drafting ? 'Writing...' : 'Write with AI'}
+              </button>
+            </div>
+          </div>
+
           <textarea
             id="note"
             className="textarea"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Adding a line here puts it at the top of the email."
+            placeholder="Write a note, or let the AI draft the follow-up from what was actually said."
             maxLength={1000}
-            disabled={sending}
-            style={{ minHeight: 64 }}
+            disabled={sending || drafting}
+            style={{ minHeight: drafting || note ? 150 : 64, transition: 'min-height 200ms' }}
           />
+          <span className="field-hint">
+            This appears at the top of the email, above the generated summary and action items.
+          </span>
         </div>
 
         <label className="row gap-2" style={{ cursor: 'pointer' }}>

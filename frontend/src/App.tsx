@@ -5,6 +5,8 @@ import AuthPage from './pages/AuthPage'
 import DashboardPage from './pages/DashboardPage'
 import MeetingsPage from './pages/MeetingsPage'
 import MeetingDetailPage from './pages/MeetingDetailPage'
+import MemoryPage from './pages/MemoryPage'
+import TasksPage from './pages/TasksPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import SecurityPage from './pages/SecurityPage'
 
@@ -48,6 +50,8 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingDetailPage />} />
+        <Route path="/ask" element={<MemoryPage />} />
+        <Route path="/tasks" element={<TasksPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/security" element={<SecurityPage />} />
         <Route path="/login" element={<Navigate to="/" replace />} />

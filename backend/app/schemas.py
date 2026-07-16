@@ -228,6 +228,92 @@ class ChatResponse(BaseModel):
     suggestions: list[str] = []
 
 
+# --- Memory (cross-meeting chat) ---------------------------------------------
+
+
+class MemoryRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("question")
+    @classmethod
+    def clean(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Question cannot be blank.")
+        return cleaned
+
+
+class MemoryCitation(BaseModel):
+    meeting_id: str
+    meeting_title: str
+    meeting_date: str
+    start_time: float
+    end_time: float
+    timestamp: str
+    speakers: list[str]
+    score: float
+    preview: str
+
+
+class MemoryResponse(BaseModel):
+    id: uuid.UUID
+    role: str
+    content: str
+    citations: list[MemoryCitation] | None
+    created_at: datetime
+    # Shown in the UI: an answer drawn from 12 meetings is a different claim from
+    # one drawn from 2, and the user should be able to see which.
+    searched_meetings: int
+    time_filter: str | None
+
+
+# --- Unified action board ----------------------------------------------------
+
+
+class ActionBoardItem(BaseModel):
+    id: uuid.UUID
+    task: str
+    owner_label: str
+    due_text: str | None
+    priority: str
+    done: bool
+    quote_time: float | None
+    meeting_id: uuid.UUID
+    meeting_title: str
+    meeting_date: datetime
+
+
+class ActionBoard(BaseModel):
+    items: list[ActionBoardItem]
+    total: int
+    open_count: int
+    done_count: int
+    owners: list[dict]
+
+
+# --- AI follow-up email ------------------------------------------------------
+
+
+class FollowUpRequest(BaseModel):
+    tone: str = Field(default="professional")
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("tone")
+    @classmethod
+    def known_tone(cls, v: str) -> str:
+        allowed = {"professional", "friendly", "brief", "formal"}
+        v = v.strip().lower()
+        if v not in allowed:
+            raise ValueError(f"Tone must be one of: {', '.join(sorted(allowed))}")
+        return v
+
+
+class FollowUpDraft(BaseModel):
+    subject: str
+    body: str
+    tone: str
+
+
 # --- Analytics ---------------------------------------------------------------
 
 

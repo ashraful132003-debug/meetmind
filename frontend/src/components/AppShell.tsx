@@ -7,17 +7,21 @@ import { api, type HealthResponse } from '../lib/api'
 import { initials } from '../lib/format'
 import {
   IconChart,
+  IconCheckCircle,
   IconHome,
   IconList,
   IconLogout,
   IconMenu,
   IconShield,
+  IconSparkle,
   IconX,
 } from './Icons'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: IconHome, end: true },
   { to: '/meetings', label: 'Meetings', icon: IconList, end: false },
+  { to: '/ask', label: 'Ask your meetings', icon: IconSparkle, end: false },
+  { to: '/tasks', label: 'Tasks', icon: IconCheckCircle, end: false },
   { to: '/analytics', label: 'Analytics', icon: IconChart, end: false },
   { to: '/security', label: 'Security', icon: IconShield, end: false },
 ]

@@ -310,6 +310,55 @@ export interface SessionInfo {
   last_used_at: string
 }
 
+export interface MemoryCitation {
+  meeting_id: string
+  meeting_title: string
+  meeting_date: string
+  start_time: number
+  end_time: number
+  timestamp: string
+  speakers: string[]
+  score: number
+  preview: string
+}
+
+export interface MemoryMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  citations: MemoryCitation[] | null
+  created_at: string
+  searched_meetings?: number
+  time_filter?: string | null
+}
+
+export interface ActionBoardItem {
+  id: string
+  task: string
+  owner_label: string
+  due_text: string | null
+  priority: 'low' | 'medium' | 'high'
+  done: boolean
+  quote_time: number | null
+  meeting_id: string
+  meeting_title: string
+  meeting_date: string
+}
+
+export interface ActionBoard {
+  items: ActionBoardItem[]
+  total: number
+  open_count: number
+  done_count: number
+  owners: { name: string; open: number }[]
+}
+
+export interface FollowUpDraft {
+  subject: string
+  body: string
+  tone: string
+}
+
 export interface HealthResponse {
   status: string
   database: boolean
@@ -381,10 +430,84 @@ export const api = {
 
   clearChat: (id: string) => request<void>(`/api/meetings/${id}/chat`, { method: 'DELETE' }),
 
+  // --- Cross-meeting memory ---
+  getMemoryHistory: () => request<MemoryMessage[]>('/api/memory/history'),
+
+  getMemorySuggestions: () => request<string[]>('/api/memory/suggestions'),
+
+  askMemory: (question: string) =>
+    request<MemoryMessage>('/api/memory', { method: 'POST', body: { question } }),
+
+  clearMemory: () => request<void>('/api/memory', { method: 'DELETE' }),
+
+  // --- Unified action board ---
+  getActionBoard: (show: 'open' | 'done' | 'all' = 'open', owner = '') =>
+    request<ActionBoard>(
+      `/api/memory/actions?show=${show}${owner ? `&owner=${encodeURIComponent(owner)}` : ''}`,
+    ),
+
+  // --- AI follow-up email ---
+  draftFollowUp: (meetingId: string, tone: string, note = '') =>
+    request<FollowUpDraft>(`/api/memory/meetings/${meetingId}/followup`, {
+      method: 'POST',
+      body: { tone, note },
+    }),
+
   listEmails: (id: string) => request<EmailDelivery[]>(`/api/meetings/${id}/email`),
 
   sendEmail: (id: string, payload: { recipients: string[]; include_transcript: boolean; note: string }) =>
     request<EmailDelivery>(`/api/meetings/${id}/email`, { method: 'POST', body: payload }),
+
+  /**
+   * Download an export. Uses fetch + Blob rather than pointing window.location at
+   * the URL, because the export endpoint needs the Authorization header and a
+   * plain navigation cannot send one - it would just 401.
+   */
+  // The explicit return type is required, not cosmetic: this function calls
+  // itself on a 401 retry, so TypeScript cannot infer the type without it.
+  exportMeeting: async (
+    id: string,
+    format: 'pdf' | 'docx',
+    includeTranscript: boolean,
+  ): Promise<{ filename: string; size: number }> => {
+    const res = await fetch(
+      `/api/meetings/${id}/export?format=${format}&include_transcript=${includeTranscript}`,
+      {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        credentials: 'include',
+      },
+    )
+
+    if (res.status === 401) {
+      // Mirror the retry that `request` does, so a download never fails just
+      // because the access token aged out while the user was reading.
+      const refreshed = await refreshAccessToken()
+      if (refreshed) return api.exportMeeting(id, format, includeTranscript)
+      onAuthLost?.()
+      throw new ApiError('Your session has expired. Please sign in again.', 401)
+    }
+    if (!res.ok) throw new ApiError(await parseError(res), res.status)
+
+    const blob = await res.blob()
+
+    // Prefer the server's filename - it already handles unsafe characters.
+    const disposition = res.headers.get('Content-Disposition') ?? ''
+    const match = /filename="([^"]+)"/.exec(disposition)
+    const filename = match?.[1] ?? `meeting.${format}`
+
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // Revoke on the next tick: revoking synchronously can cancel the download
+    // in some browsers before it has started reading the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+
+    return { filename, size: blob.size }
+  },
 
   uploadMeeting: (file: File, title: string, source: 'upload' | 'recording', onProgress?: (pct: number) => void) => {
     // XHR rather than fetch: fetch still cannot report upload progress, and a

@@ -33,6 +33,12 @@ numpy==2.2.1
 # --- Media ---
 pydub==0.25.1
 
+# --- Export (PDF / Word) ---
+# Both pure Python, no system libraries. WeasyPrint would render nicer HTML-to-PDF
+# but needs GTK natively, which a 512MB free host cannot install.
+reportlab==4.2.5
+python-docx==1.1.2
+
 # --- Dev / test ---
 pytest==8.3.4
 pytest-asyncio==0.25.0

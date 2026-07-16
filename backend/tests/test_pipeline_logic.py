@@ -5,7 +5,9 @@ parsing, and prompt hardening. No models, no database, no network.
 import numpy as np
 import pytest
 
-from app.services import analysis, diarize, rag
+from datetime import datetime, timezone
+
+from app.services import analysis, diarize, memory, rag
 from app.services.llm import _wrap_untrusted, parse_json
 from app.services.pipeline import _merge_consecutive, _speaker_stats
 from app.routers.analytics import _balance_score
@@ -182,6 +184,160 @@ class TestRanking:
         chunks = [{"text": "zero", "embedding": [0.0, 0.0]}, {"text": "ok", "embedding": [1.0, 0.0]}]
         ranked = rag.rank_chunks([1.0, 0.0], chunks)
         assert all(np.isfinite(c["score"]) for c in ranked)
+
+
+class TestMemoryTimeWindow:
+    """Parsing "last week" out of a question.
+
+    A rule table rather than an LLM call: instant, free, deterministic, testable.
+    """
+
+    NOW = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+
+    def test_no_time_expression(self):
+        w = memory.parse_time_window("What did we decide about pricing?", self.NOW)
+        assert not w.is_set
+
+    def test_last_week(self):
+        w = memory.parse_time_window("What did the client say last week?", self.NOW)
+        assert w.is_set
+        assert w.label == "last week"
+        # last week = 14 to 7 days back, not "the last 7 days"
+        assert (self.NOW - w.after).days == 14
+        assert (self.NOW - w.before).days == 7
+
+    def test_this_week_runs_to_now(self):
+        w = memory.parse_time_window("anything this week about the API?", self.NOW)
+        assert w.is_set and w.before is None
+
+    def test_longer_phrase_wins_over_shorter(self):
+        """"last two weeks" must not be swallowed by the "last week" pattern."""
+        w = memory.parse_time_window("what happened in the past two weeks?", self.NOW)
+        assert w.label == "past two weeks"
+        assert (self.NOW - w.after).days == 14
+        assert w.before is None
+
+    def test_hinglish(self):
+        w = memory.parse_time_window("pichhle hafte client ne kya bola?", self.NOW)
+        assert w.is_set and w.label == "pichhle hafte"
+
+    def test_case_insensitive(self):
+        assert memory.parse_time_window("LAST MONTH?", self.NOW).is_set
+
+
+class TestMemoryVerification:
+    """The layer that stops a model lying about which meeting a quote came from.
+
+    Measured on Llama 3.2 3B, misattribution happened often enough to matter -
+    quoting a real line but naming the wrong meeting. That is the worst failure
+    available here: the user acts on a decision they think was made with a
+    different client. So every quote is checked against the meeting it names.
+    """
+
+    BLOCKS = [
+        {
+            "number": 1,
+            "meeting_id": "m1",
+            "title": "Acme scope call",
+            "date": "2026-07-01",
+            "date_str": "01 Jul 2026",
+            "text": "[00:10] Priya: Phase one is one way sync, price stays at eighteen lakhs.",
+            "chunks": [{"start_time": 10.0, "end_time": 40.0, "speakers": ["Priya"],
+                        "text": "[00:10] Priya: Phase one is one way sync, price stays at eighteen lakhs."}],
+        },
+        {
+            "number": 2,
+            "meeting_id": "m2",
+            "title": "Quarterly planning",
+            "date": "2026-07-02",
+            "date_str": "02 Jul 2026",
+            "text": "[01:00] Sneha: No mobile app this quarter.",
+            "chunks": [{"start_time": 60.0, "end_time": 90.0, "speakers": ["Sneha"],
+                        "text": "[01:00] Sneha: No mobile app this quarter."}],
+        },
+    ]
+
+    def test_correct_attribution_passes(self):
+        v, r = memory.verify_sources(
+            [{"meeting": 1, "quote": "price stays at eighteen lakhs"}], self.BLOCKS
+        )
+        assert len(v) == 1 and not r
+
+    def test_misattributed_quote_is_rejected(self):
+        """A real quote credited to the wrong meeting - the exact bug this exists for."""
+        v, r = memory.verify_sources(
+            [{"meeting": 2, "quote": "price stays at eighteen lakhs"}], self.BLOCKS
+        )
+        assert not v
+        assert "from meeting 1" in r[0]["reason"]
+
+    def test_hallucinated_quote_is_rejected(self):
+        v, r = memory.verify_sources(
+            [{"meeting": 1, "quote": "we agreed to acquire Twitter for ten crores"}], self.BLOCKS
+        )
+        assert not v
+        assert "not found in any meeting" in r[0]["reason"]
+
+    def test_out_of_range_meeting_is_rejected(self):
+        v, r = memory.verify_sources([{"meeting": 9, "quote": "no mobile app"}], self.BLOCKS)
+        assert not v and "does not exist" in r[0]["reason"]
+
+    def test_minor_paraphrase_still_verifies(self):
+        """Models drop filler words while quoting honestly; that must not fail."""
+        v, _ = memory.verify_sources(
+            [{"meeting": 2, "quote": "No mobile app this quarter"}], self.BLOCKS
+        )
+        assert len(v) == 1
+
+    def test_empty_quote_rejected(self):
+        v, r = memory.verify_sources([{"meeting": 1, "quote": ""}], self.BLOCKS)
+        assert not v and r
+
+    def test_mixed_keeps_good_drops_bad(self):
+        v, r = memory.verify_sources(
+            [
+                {"meeting": 1, "quote": "one way sync"},
+                {"meeting": 1, "quote": "no mobile app this quarter"},  # actually meeting 2
+            ],
+            self.BLOCKS,
+        )
+        assert len(v) == 1 and len(r) == 1
+
+    def test_unparseable_meeting_number(self):
+        v, r = memory.verify_sources([{"meeting": "one", "quote": "one way sync"}], self.BLOCKS)
+        assert not v and r
+
+
+class TestNoAnswerDetection:
+    """A negative answer must not carry sources.
+
+    The model sets found=true and then writes "They didn't discuss that" while
+    citing an unrelated excerpt. The quote is real but supports nothing, and a
+    source under a "no" answer reads as though something was found.
+    """
+
+    def test_plain_no_answer(self):
+        assert not memory.answer_found_something("I can't find that in your meetings.")
+
+    def test_negative_phrasings(self):
+        for text in [
+            "They didn't discuss a merger with Google in these meetings.",
+            "That was not covered in this meeting.",
+            "There is no mention of that.",
+            "It wasn't mentioned anywhere.",
+        ]:
+            assert not memory.answer_found_something(text), text
+
+    def test_real_answer_is_not_flagged(self):
+        assert memory.answer_found_something(
+            'The team went with one-way sync, in "Acme scope call".'
+        )
+
+    def test_answer_containing_a_no_is_not_flagged(self):
+        """"No mobile app" is a real finding, not an absence of one."""
+        assert memory.answer_found_something(
+            'No, they decided against the mobile app in "Quarterly planning".'
+        )
 
 
 class TestBM25:
