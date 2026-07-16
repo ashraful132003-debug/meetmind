@@ -11,6 +11,35 @@ still works end to end.
 
 ---
 
+## Try it
+
+**Live:** https://meetmind-cj0b.onrender.com
+
+```
+demo@meetmind.app  /  meetmind-demo-2026
+```
+
+The demo account has three meetings already in it, so the dashboard, cross-meeting
+memory and task board have something real to work with. Register your own account
+to upload something of your own — the two are fully isolated.
+
+Two things to know before you judge it:
+
+* **It sleeps.** Free tier: the first request after 15 minutes idle takes ~50
+  seconds to wake the instance. Nothing is broken, it is just cold.
+* **The deployed build is NOT the private one.** A free instance has 512MB; Whisper
+  needs ~2GB and Llama 3.2 needs ~3GB, so the hosted version calls Groq's free tier
+  instead and the audio leaves the machine. The privacy claim above holds for the
+  local setup — `TRANSCRIPTION_PROVIDER=local`, which is the default. Same codebase,
+  one environment variable. See [DEPLOY.md](DEPLOY.md).
+
+The seed meetings are synthetic — invented people, invented companies, voices from
+Windows' own TTS. But nothing about them is faked: they went through the same
+upload endpoint, the same Whisper, the same diarizer and the same LLM as a live
+recording. See `scripts/make_seed_audio.py` and `scripts/seed_live.py`.
+
+---
+
 ## Why this is built the way it is
 
 Most "AI meeting assistant" projects are a thin wrapper around a hosted API: audio
@@ -338,19 +367,39 @@ worse than no link.
 
 ## Deploying free
 
-`docker-compose.yml` builds the whole stack. The catch worth knowing: free hosting
-tiers cap out around 512 MB RAM, and Whisper `small` plus Llama 3.2 3B need roughly
-6 GB. **A free tier cannot run the local models.**
+Deployed and running at https://meetmind-cj0b.onrender.com — ₹0, no credit card.
 
-Two honest options:
+The constraint that shapes the whole deployment: a free instance has **512 MB** of
+RAM. Whisper needs ~2 GB and Llama 3.2 needs ~3 GB. **A free tier cannot run the
+local models** — no configuration fixes that, and anyone claiming otherwise has not
+tried it.
 
-1. **Deploy with a hosted LLM.** Set `LLM_PROVIDER=anthropic` (or `openai`) and
-   `WHISPER_MODEL=tiny`. Fits a small instance, costs a few cents per meeting.
-2. **Keep it local and demo it locally.** For an interview this is the stronger
-   story anyway: "it runs entirely on my machine, here is the network tab showing
-   zero outbound calls."
+So the hosted build swaps the provider rather than the code. Groq is the only free
+tier (no card) serving *both* a chat model and Whisper, which leaves the instance
+doing only web serving, diarization (a 25 MB ONNX model) and BM25 retrieval. That
+fits.
 
-See `DEPLOY.md`.
+| | Local (default) | Deployed |
+|---|---|---|
+| Transcription | Whisper `small`, on your GPU | Groq Whisper large-v3-turbo |
+| Language model | Llama 3.2 **3B** | Llama 3.3 **70B** |
+| Retrieval | semantic (embeddings) | BM25 lexical |
+| Audio leaves the machine? | **Never** | **Yes — sent to Groq** |
+| Cost | ₹0 | ₹0 |
+
+Two things follow that are worth saying out loud:
+
+**The deployed build is smarter, not weaker.** 70B beats the 3B a laptop can run —
+which is why cross-meeting attribution measures 3/3 on the live instance and 6/7
+locally. You trade privacy for capability, and the code makes that a one-variable
+decision instead of a rewrite.
+
+**The privacy claim is about local mode only.** `TRANSCRIPTION_PROVIDER=local` is the
+default and means it: unplug the WiFi, the app still works. Say that precisely in an
+interview — the distinction *is* the architecture, and hedging it is worse than the
+limitation.
+
+Full step-by-step (GitHub → Groq key → Neon → Render): [DEPLOY.md](DEPLOY.md).
 
 ---
 
