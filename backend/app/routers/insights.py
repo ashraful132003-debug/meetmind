@@ -22,6 +22,7 @@ database read, not a fresh model call.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -65,6 +66,11 @@ heavy_limiter = RateLimiter(12, 60, "insights_heavy")
 # people care about, and this keeps one request from computing 200 LLM insights
 # on a 512MB instance.
 MAX_MEETINGS = 30
+
+# Cap on how many insight LLM calls run at once. Parallelism is what makes the
+# first load fast (N meetings analysed together, not one after another), but Groq's
+# free tier rate-limits, so this stays modest rather than firing 30 calls at once.
+_LLM_SEM = asyncio.Semaphore(6)
 
 
 # --- Shared helpers ----------------------------------------------------------
@@ -155,6 +161,78 @@ async def _cached_insight(
     return result
 
 
+async def _bulk_insights(
+    db: AsyncSession,
+    meetings: list[Meeting],
+    kind: str,
+    compute: Callable[[str], Awaitable],
+) -> dict:
+    """Get `kind` insights for many meetings at once, computing misses in parallel.
+
+    This is the difference between the Insights page opening in a second and
+    opening in fifteen. `_cached_insight` runs one meeting at a time; here the
+    cached rows are read in a single query, and only the cache *misses* hit the
+    LLM — concurrently, bounded by `_LLM_SEM`. DB access stays sequential (a single
+    AsyncSession is not safe to share across concurrent awaits); only the LLM
+    calls, which are the slow part, run together.
+
+    Returns {meeting_id: result}.
+    """
+    if not meetings:
+        return {}
+
+    ids = [m.id for m in meetings]
+    rows = (
+        await db.scalars(
+            select(MeetingInsight).where(
+                MeetingInsight.meeting_id.in_(ids), MeetingInsight.kind == kind
+            )
+        )
+    ).all()
+
+    result: dict = {}
+    for r in rows:
+        try:
+            result[r.meeting_id] = json.loads(decrypt_text(r.payload_enc))
+        except (ValueError, json.JSONDecodeError):
+            await db.delete(r)
+    await db.flush()
+
+    misses = [m for m in meetings if m.id not in result]
+    if not misses:
+        return result
+
+    # Build transcripts first (sequential DB reads), then fan the LLM calls out.
+    transcripts: dict = {}
+    for m in misses:
+        text = await _meeting_transcript(db, m)
+        if text.strip():
+            transcripts[m.id] = text
+
+    targets = [m for m in misses if m.id in transcripts]
+
+    async def _run(text: str):
+        async with _LLM_SEM:
+            return await compute(text)
+
+    computed = await asyncio.gather(
+        *(_run(transcripts[m.id]) for m in targets), return_exceptions=True
+    )
+
+    for m, res in zip(targets, computed):
+        if isinstance(res, Exception):
+            log.warning("Insight '%s' failed for %s: %s", kind, m.id, res)
+            continue
+        result[m.id] = res
+        db.add(MeetingInsight(meeting_id=m.id, kind=kind, payload_enc=encrypt_text(json.dumps(res))))
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+    return result
+
+
 def _decision_items(meeting: Meeting, decisions: list[dict]) -> list[dict]:
     """Attach meeting provenance to each decision and give it a stable id."""
     out = []
@@ -178,16 +256,13 @@ def _decision_items(meeting: Meeting, decisions: list[dict]) -> list[dict]:
 async def _all_decisions(db: AsyncSession, meetings: list[Meeting]) -> list[dict]:
     """Every decision across the given meetings, newest meeting first.
 
-    Per-meeting extraction is cached, and one meeting's LLM failure is skipped
-    rather than allowed to blank the whole board.
+    Extraction is cached and, on a cache miss, computed for all meetings in
+    parallel. One meeting's LLM failure is skipped rather than blanking the board.
     """
+    by_meeting = await _bulk_insights(db, meetings, "decisions", insights.extract_decisions)
     items: list[dict] = []
     for m in meetings:
-        try:
-            decisions = await _cached_insight(db, m, "decisions", insights.extract_decisions)
-        except (LLMError, LLMUnavailable) as e:
-            log.warning("Decision extraction failed for %s: %s", m.id, e)
-            continue
+        decisions = by_meeting.get(m.id)
         if decisions:
             items.extend(_decision_items(m, decisions))
     return items
@@ -338,6 +413,7 @@ async def knowledge_graph(
     exactly the cross-meeting connection a list of summaries hides.
     """
     meetings = await _ready_meetings(db, user)
+    entities_by_meeting = await _bulk_insights(db, meetings, "entities", insights.extract_entities)
 
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
@@ -347,11 +423,7 @@ async def knowledge_graph(
         return f"{kind}:{label.strip().lower()}"
 
     for m in meetings:
-        try:
-            ents = await _cached_insight(db, m, "entities", insights.extract_entities)
-        except (LLMError, LLMUnavailable) as e:
-            log.warning("Entity extraction failed for %s: %s", m.id, e)
-            continue
+        ents = entities_by_meeting.get(m.id)
         if not ents:
             continue
 
@@ -426,13 +498,11 @@ async def daily_digest(
 
     day_meetings = [m for m in recent if m.created_at.date() == target_day]
 
-    # Decisions from the day's meetings.
+    # Decisions from the day's meetings (cached / computed in parallel).
     day_decisions: list[dict] = []
+    ds_by_meeting = await _bulk_insights(db, day_meetings, "decisions", insights.extract_decisions)
     for m in day_meetings:
-        try:
-            ds = await _cached_insight(db, m, "decisions", insights.extract_decisions)
-        except (LLMError, LLMUnavailable):
-            ds = None
+        ds = ds_by_meeting.get(m.id)
         if ds:
             day_decisions.extend(_decision_items(m, ds))
 

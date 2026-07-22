@@ -35,9 +35,14 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconSparkle }[] = [
 function Computing({ label }: { label: string }) {
   return (
     <div className="stack gap-3">
-      <div className="row gap-2">
-        <span className="spinner" style={{ color: 'var(--accent-bright)' }} />
-        <span style={{ fontSize: 13.5, color: 'var(--text-secondary)' }}>{label}</span>
+      <div className="stack gap-1">
+        <div className="row gap-2">
+          <span className="spinner" style={{ color: 'var(--accent-bright)' }} />
+          <span style={{ fontSize: 13.5, color: 'var(--text-secondary)' }}>{label}</span>
+        </div>
+        <span style={{ fontSize: 11.5, color: 'var(--text-quaternary)', paddingLeft: 24 }}>
+          First time only — the AI reads across your meetings. It's cached after this, so it opens instantly next time.
+        </span>
       </div>
       <div className="skeleton" style={{ height: 90 }} />
       <div className="skeleton" style={{ height: 90 }} />

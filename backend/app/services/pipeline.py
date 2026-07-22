@@ -206,6 +206,59 @@ async def _process(meeting_id: uuid.UUID) -> None:
 
     log.info("Meeting %s processed: %d segments, %d speakers", meeting_id, len(merged), len(tags))
 
+    # Pre-warm the cross-meeting insights (decisions, entities, blind spots) while
+    # we already have the transcript in hand. Processing is a background task the
+    # user is already waiting on, so a few extra LLM calls here are invisible — and
+    # in exchange the Insights page opens instantly instead of computing them live
+    # on first view. Best-effort: a failure never fails the meeting, the insight
+    # just falls back to computing lazily later.
+    try:
+        await _prewarm_insights(meeting_id, analysis_result.summary, transcript_text)
+    except Exception as e:  # noqa: BLE001 — pre-warming must never break processing
+        log.warning("Insight pre-warm skipped for %s: %s", meeting_id, e)
+
+
+async def _prewarm_insights(meeting_id: uuid.UUID, summary: str, transcript_text: str) -> None:
+    """Compute and cache the per-meeting insights the Insights page reads.
+
+    Runs the three extractions concurrently. Rows are written with the same
+    (meeting_id, kind) shape the insights router reads, so a pre-warmed meeting is
+    a pure cache hit there.
+    """
+    import json
+
+    from . import insights as insights_service
+    from ..models import MeetingInsight
+
+    context = f"SUMMARY:\n{summary}\n\nTRANSCRIPT:\n{transcript_text}"
+    kinds = {
+        "decisions": insights_service.extract_decisions(context),
+        "entities": insights_service.extract_entities(context),
+        "blindspots": insights_service.blind_spots(context),
+    }
+    results = await asyncio.gather(*kinds.values(), return_exceptions=True)
+
+    async with SessionLocal() as db:
+        wrote = False
+        for kind, res in zip(kinds.keys(), results):
+            if isinstance(res, Exception):
+                log.warning("Pre-warm '%s' failed for %s: %s", kind, meeting_id, res)
+                continue
+            # A re-process should refresh, not collide with, the old cache row.
+            await db.execute(
+                delete(MeetingInsight).where(
+                    MeetingInsight.meeting_id == meeting_id, MeetingInsight.kind == kind
+                )
+            )
+            db.add(
+                MeetingInsight(
+                    meeting_id=meeting_id, kind=kind, payload_enc=encrypt_text(json.dumps(res))
+                )
+            )
+            wrote = True
+        if wrote:
+            await db.commit()
+
 
 def _merge_consecutive(utterances: list, max_gap: float = 1.2) -> list:
     """Join back-to-back segments from the same speaker into one utterance."""
