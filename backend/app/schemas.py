@@ -361,6 +361,112 @@ class WorkspaceStats(BaseModel):
     recent_activity: list[dict]
 
 
+# --- Insights (decisions, blind spots, contradictions, timeline, graph) ------
+
+
+class DecisionItem(BaseModel):
+    id: str
+    decision: str
+    made_by: str
+    topic: str
+    status: str
+    quote: str
+    meeting_id: str
+    meeting_title: str
+    meeting_date: datetime
+
+
+class DecisionBoard(BaseModel):
+    items: list[DecisionItem]
+    total: int
+    topics: list[dict]
+
+
+class ContradictionItem(BaseModel):
+    topic: str
+    explanation: str
+    earlier: DecisionItem
+    later: DecisionItem
+
+
+class ContradictionBoard(BaseModel):
+    items: list[ContradictionItem]
+    total: int
+    checked_decisions: int
+
+
+class BlindSpotFinding(BaseModel):
+    category: str
+    concern: str
+    question: str
+
+
+class BlindSpotReport(BaseModel):
+    meeting_id: str
+    headline: str
+    findings: list[BlindSpotFinding]
+
+
+class TimelineEvent(BaseModel):
+    date: datetime
+    kind: str  # 'meeting' | 'decision'
+    title: str
+    detail: str
+    meeting_id: str
+    meeting_title: str
+    status: str | None = None
+
+
+class TimelineResponse(BaseModel):
+    events: list[TimelineEvent]
+    total: int
+
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    kind: str  # 'meeting' | 'person' | 'project' | 'client'
+    weight: int
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+
+
+class KnowledgeGraph(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    meeting_count: int
+    entity_count: int
+
+
+class DigestMeeting(BaseModel):
+    id: str
+    title: str
+    created_at: datetime
+    duration_seconds: float
+    open_action_count: int
+
+
+class DigestResponse(BaseModel):
+    generated_for: str
+    is_today: bool
+    meeting_count: int
+    meetings: list[DigestMeeting]
+    decisions: list[DecisionItem]
+    open_action_count: int
+    priority_actions: list[ActionBoardItem]
+    narrative: str
+    empty: bool
+
+
+class PrepResponse(BaseModel):
+    meeting_id: str
+    briefing: str
+    related_meetings: list[dict]
+
+
 # --- Email -------------------------------------------------------------------
 
 

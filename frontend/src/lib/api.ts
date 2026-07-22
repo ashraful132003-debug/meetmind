@@ -359,6 +359,111 @@ export interface FollowUpDraft {
   tone: string
 }
 
+// --- Insights ----------------------------------------------------------------
+
+export interface DecisionItem {
+  id: string
+  decision: string
+  made_by: string
+  topic: string
+  status: 'decided' | 'reversed'
+  quote: string
+  meeting_id: string
+  meeting_title: string
+  meeting_date: string
+}
+
+export interface DecisionBoard {
+  items: DecisionItem[]
+  total: number
+  topics: { topic: string; count: number }[]
+}
+
+export interface ContradictionItem {
+  topic: string
+  explanation: string
+  earlier: DecisionItem
+  later: DecisionItem
+}
+
+export interface ContradictionBoard {
+  items: ContradictionItem[]
+  total: number
+  checked_decisions: number
+}
+
+export interface BlindSpotFinding {
+  category: string
+  concern: string
+  question: string
+}
+
+export interface BlindSpotReport {
+  meeting_id: string
+  headline: string
+  findings: BlindSpotFinding[]
+}
+
+export interface TimelineEvent {
+  date: string
+  kind: 'meeting' | 'decision'
+  title: string
+  detail: string
+  meeting_id: string
+  meeting_title: string
+  status: string | null
+}
+
+export interface TimelineResponse {
+  events: TimelineEvent[]
+  total: number
+}
+
+export interface GraphNode {
+  id: string
+  label: string
+  kind: 'meeting' | 'person' | 'project' | 'client'
+  weight: number
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+}
+
+export interface KnowledgeGraph {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  meeting_count: number
+  entity_count: number
+}
+
+export interface DigestMeeting {
+  id: string
+  title: string
+  created_at: string
+  duration_seconds: number
+  open_action_count: number
+}
+
+export interface DigestResponse {
+  generated_for: string
+  is_today: boolean
+  meeting_count: number
+  meetings: DigestMeeting[]
+  decisions: DecisionItem[]
+  open_action_count: number
+  priority_actions: ActionBoardItem[]
+  narrative: string
+  empty: boolean
+}
+
+export interface PrepResponse {
+  meeting_id: string
+  briefing: string
+  related_meetings: { id: string; title: string }[]
+}
+
 export interface HealthResponse {
   status: string
   database: boolean
@@ -452,6 +557,58 @@ export const api = {
       method: 'POST',
       body: { tone, note },
     }),
+
+  // --- Insights ---
+  getDecisions: () => request<DecisionBoard>('/api/insights/decisions'),
+
+  getContradictions: () => request<ContradictionBoard>('/api/insights/contradictions'),
+
+  getTimeline: () => request<TimelineResponse>('/api/insights/timeline'),
+
+  getKnowledgeGraph: () => request<KnowledgeGraph>('/api/insights/graph'),
+
+  getDigest: () => request<DigestResponse>('/api/insights/digest'),
+
+  getBlindSpots: (meetingId: string) =>
+    request<BlindSpotReport>(`/api/insights/meetings/${meetingId}/blindspots`),
+
+  getMeetingPrep: (meetingId: string) =>
+    request<PrepResponse>(`/api/insights/meetings/${meetingId}/prep`),
+
+  /**
+   * Download an .ics calendar file. Like exportMeeting, this uses fetch + Blob
+   * rather than a plain navigation because the endpoint needs the Authorization
+   * header — a bare <a href> could not send one and would just 401.
+   */
+  downloadCalendar: async (meetingId?: string): Promise<{ filename: string }> => {
+    const path = meetingId
+      ? `/api/insights/meetings/${meetingId}/calendar.ics`
+      : '/api/insights/calendar.ics'
+    const res = await fetch(path, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      credentials: 'include',
+    })
+
+    if (res.status === 401) {
+      const refreshed = await refreshAccessToken()
+      if (refreshed) return api.downloadCalendar(meetingId)
+      onAuthLost?.()
+      throw new ApiError('Your session has expired. Please sign in again.', 401)
+    }
+    if (!res.ok) throw new ApiError(await parseError(res), res.status)
+
+    const blob = await res.blob()
+    const filename = meetingId ? `${meetingId}.ics` : 'meetmind.ics'
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    return { filename }
+  },
 
   listEmails: (id: string) => request<EmailDelivery[]>(`/api/meetings/${id}/email`),
 

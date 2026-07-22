@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import AnalyticsPanel from '../components/AnalyticsPanel'
 import AudioPlayer, { type AudioPlayerHandle } from '../components/AudioPlayer'
+import BlindSpotPanel from '../components/BlindSpotPanel'
 import ChatPanel from '../components/ChatPanel'
 import EmailPanel from '../components/EmailPanel'
 import ExportPanel from '../components/ExportPanel'
+import PrepPanel from '../components/PrepPanel'
 import SummaryPanel from '../components/SummaryPanel'
 import TranscriptPanel from '../components/TranscriptPanel'
 import { useToast } from '../context/ToastContext'
@@ -12,6 +14,8 @@ import { ApiError, api, type MeetingDetail } from '../lib/api'
 import { STATUS_LABELS, formatDateTime, formatDuration, isProcessing, languageName } from '../lib/format'
 import {
   IconAlert,
+  IconBulb,
+  IconCalendar,
   IconChart,
   IconChat,
   IconEdit,
@@ -23,7 +27,7 @@ import {
   IconUsers,
 } from '../components/Icons'
 
-type Tab = 'summary' | 'transcript' | 'ask' | 'analytics' | 'share' | 'export'
+type Tab = 'summary' | 'transcript' | 'ask' | 'blindspots' | 'prep' | 'analytics' | 'share' | 'export'
 
 const STAGES = ['uploaded', 'transcribing', 'diarizing', 'analyzing', 'indexing'] as const
 
@@ -239,6 +243,8 @@ export default function MeetingDetailPage() {
     { key: 'summary', label: 'Summary', icon: IconSparkle },
     { key: 'transcript', label: 'Transcript', icon: IconUsers },
     { key: 'ask', label: 'Ask', icon: IconChat },
+    { key: 'blindspots', label: 'Blind Spots', icon: IconBulb },
+    { key: 'prep', label: 'Prep', icon: IconCalendar },
     { key: 'analytics', label: 'Analytics', icon: IconChart },
     { key: 'share', label: 'Email', icon: IconMail },
     { key: 'export', label: 'Export', icon: IconFile },
@@ -378,6 +384,8 @@ export default function MeetingDetailPage() {
               />
             )}
             {tab === 'ask' && <ChatPanel meetingId={meeting.id} ready={ready} onSeek={seek} />}
+            {tab === 'blindspots' && <BlindSpotPanel meetingId={meeting.id} ready={ready} />}
+            {tab === 'prep' && <PrepPanel meetingId={meeting.id} ready={ready} />}
             {tab === 'analytics' && (
               <AnalyticsPanel meetingId={meeting.id} currentTime={currentTime} onSeek={seek} />
             )}

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../context/ToastContext'
-import { ApiError, api, type ActionBoard } from '../lib/api'
-import { formatRelativeTime } from '../lib/format'
-import { IconCheck, IconCheckCircle, IconCircle, IconRefresh, IconSparkle } from '../components/Icons'
+import { ApiError, api, type ActionBoard, type ActionBoardItem } from '../lib/api'
+import { formatRelativeTime, parseDue, type DueTone } from '../lib/format'
+import { IconCheck, IconCheckCircle, IconCircle, IconClock, IconMail, IconRefresh, IconSparkle } from '../components/Icons'
 
 type Show = 'open' | 'done' | 'all'
 
@@ -11,6 +11,20 @@ const PRIORITY_STYLE: Record<string, { bg: string; fg: string }> = {
   high: { bg: 'rgba(239,68,68,0.12)', fg: '#f87171' },
   medium: { bg: 'rgba(245,158,11,0.12)', fg: '#fbbf24' },
   low: { bg: 'rgba(16,185,129,0.12)', fg: '#34d399' },
+}
+
+const DUE_STYLE: Record<DueTone, { bg: string; fg: string; prefix: string }> = {
+  overdue: { bg: 'rgba(239,68,68,0.14)', fg: '#f87171', prefix: 'overdue · ' },
+  soon: { bg: 'rgba(245,158,11,0.14)', fg: '#fbbf24', prefix: 'due ' },
+  scheduled: { bg: 'rgba(99,102,241,0.14)', fg: 'var(--accent-bright)', prefix: 'due ' },
+  vague: { bg: 'var(--surface-2)', fg: 'var(--text-tertiary)', prefix: 'due ' },
+}
+
+/** A pasteable nudge for a still-open commitment — a real "reminder" the user can
+ *  drop into WhatsApp or email, without needing a server-side scheduler. */
+function reminderText(item: ActionBoardItem): string {
+  const due = item.due_text ? ` (due ${item.due_text})` : ''
+  return `Reminder: ${item.task}${due} — from "${item.meeting_title}". Assigned to ${item.owner_label}.`
 }
 
 /**
@@ -71,6 +85,31 @@ export default function TasksPage() {
     }
   }
 
+  const copyReminder = async (item: ActionBoardItem) => {
+    try {
+      await navigator.clipboard.writeText(reminderText(item))
+      toast.success('Reminder copied — paste it into WhatsApp or email.')
+    } catch {
+      toast.error('Could not copy to clipboard.')
+    }
+  }
+
+  // Follow-up tracking: how urgent are the open items currently in view.
+  const followUp = useMemo(() => {
+    const open = (board?.items ?? []).filter((i) => !i.done)
+    let overdue = 0
+    let soon = 0
+    let deadlined = 0
+    for (const i of open) {
+      if (!i.due_text) continue
+      deadlined++
+      const tone = parseDue(i.due_text).tone
+      if (tone === 'overdue') overdue++
+      else if (tone === 'soon') soon++
+    }
+    return { overdue, soon, deadlined, open: open.length }
+  }, [board])
+
   const FILTERS: { key: Show; label: string; count?: number }[] = [
     { key: 'open', label: 'Open', count: board?.open_count },
     { key: 'done', label: 'Done', count: board?.done_count },
@@ -91,6 +130,29 @@ export default function TasksPage() {
           <IconRefresh size={14} />
         </button>
       </div>
+
+      {show === 'open' && followUp.deadlined > 0 && (
+        <div
+          className="card row gap-3 wrap"
+          style={{
+            padding: '11px 15px',
+            alignItems: 'center',
+            borderLeft: `3px solid ${followUp.overdue > 0 ? 'var(--danger)' : followUp.soon > 0 ? 'var(--warning)' : 'var(--accent)'}`,
+          }}
+        >
+          <IconClock size={15} className="" />
+          <span className="grow" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Follow-up tracker:</strong>{' '}
+            {followUp.overdue > 0 && (
+              <span style={{ color: '#f87171' }}>{followUp.overdue} overdue</span>
+            )}
+            {followUp.overdue > 0 && (followUp.soon > 0 || followUp.deadlined > 0) && ' · '}
+            {followUp.soon > 0 && <span style={{ color: '#fbbf24' }}>{followUp.soon} due soon</span>}
+            {(followUp.overdue > 0 || followUp.soon > 0) && ' · '}
+            {followUp.deadlined} with a deadline
+          </span>
+        </div>
+      )}
 
       <div className="row gap-3 wrap" style={{ justifyContent: 'space-between' }}>
         <div className="tabs" style={{ border: 'none' }}>
@@ -212,17 +274,34 @@ export default function TasksPage() {
                     <span className="badge badge-neutral" style={{ fontSize: 10.5 }}>
                       {item.owner_label}
                     </span>
-                    {item.due_text && (
-                      <span className="badge badge-warning" style={{ fontSize: 10.5 }}>
-                        due {item.due_text}
-                      </span>
-                    )}
+                    {item.due_text &&
+                      (() => {
+                        const due = DUE_STYLE[parseDue(item.due_text).tone]
+                        return (
+                          <span
+                            className="badge"
+                            style={{ background: due.bg, color: due.fg, fontSize: 10.5, borderColor: 'transparent' }}
+                          >
+                            {due.prefix}
+                            {item.due_text}
+                          </span>
+                        )
+                      })()}
                     <span
                       className="badge"
                       style={{ background: style.bg, color: style.fg, fontSize: 10.5, borderColor: 'transparent' }}
                     >
                       {item.priority}
                     </span>
+                    {!item.done && (
+                      <button
+                        onClick={() => copyReminder(item)}
+                        style={{ fontSize: 10.5, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 4 }}
+                        title="Copy a reminder to paste into WhatsApp or email"
+                      >
+                        <IconMail size={10} /> Remind
+                      </button>
+                    )}
                     <button
                       onClick={() => navigate(`/meetings/${item.meeting_id}`)}
                       style={{

@@ -231,3 +231,50 @@ export const IconEdit = ({ size = 16, className, strokeWidth = 1.75 }: IconProps
     <path d="M17.5 3a2.12 2.12 0 0 1 3 3L12 14.5l-4 1 1-4 8.5-8.5Z" />
   </svg>
 )
+
+export const IconBulb = ({ size = 16, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size, strokeWidth)} className={className}>
+    <path d="M9 18h6M10 21h4" />
+    <path d="M12 2a6.5 6.5 0 0 0-4 11.6c.7.6 1 1.2 1 2.1v.3h6v-.3c0-.9.3-1.5 1-2.1A6.5 6.5 0 0 0 12 2Z" />
+  </svg>
+)
+
+export const IconNetwork = ({ size = 16, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size, strokeWidth)} className={className}>
+    <circle cx="12" cy="5" r="2.5" />
+    <circle cx="5" cy="18" r="2.5" />
+    <circle cx="19" cy="18" r="2.5" />
+    <path d="M10.5 7 6.5 15.8M13.5 7l4 8.8M7.5 18h9" />
+  </svg>
+)
+
+export const IconCalendar = ({ size = 16, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size, strokeWidth)} className={className}>
+    <rect x="3.5" y="5" width="17" height="16" rx="2.5" />
+    <line x1="3.5" y1="9.5" x2="20.5" y2="9.5" />
+    <line x1="8" y1="3" x2="8" y2="6.5" />
+    <line x1="16" y1="3" x2="16" y2="6.5" />
+  </svg>
+)
+
+export const IconScale = ({ size = 16, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size, strokeWidth)} className={className}>
+    <path d="M12 3v18M7 21h10M5 7h14l-3.5 6.5a3 3 0 0 1-7 0L5 7ZM12 7 8 5.5M12 7l4-1.5" />
+  </svg>
+)
+
+export const IconGitCommit = ({ size = 16, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size, strokeWidth)} className={className}>
+    <circle cx="12" cy="12" r="3.5" />
+    <line x1="3" y1="12" x2="8.5" y2="12" />
+    <line x1="15.5" y1="12" x2="21" y2="12" />
+  </svg>
+)
+
+export const IconDownload = ({ size = 16, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size, strokeWidth)} className={className}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+)

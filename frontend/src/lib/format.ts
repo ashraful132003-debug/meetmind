@@ -100,3 +100,53 @@ export const STATUS_LABELS: Record<string, string> = {
 export function isProcessing(status: string): boolean {
   return ['uploaded', 'transcribing', 'diarizing', 'analyzing', 'indexing'].includes(status)
 }
+
+export type DueTone = 'overdue' | 'soon' | 'scheduled' | 'vague'
+
+/**
+ * Best-effort urgency from a free-text deadline like "Friday", "by the 20th",
+ * "tomorrow", or "next sprint".
+ *
+ * Deliberately conservative: deadlines in meetings are spoken casually, and a
+ * confident-but-wrong "overdue" flag is worse than an honest "has a deadline".
+ * Anything it cannot resolve to a real date falls back to `vague` — still shown,
+ * just not colour-coded as urgent. `reference` is injectable so this is testable
+ * and never calls Date.now() implicitly in surprising places.
+ */
+export function parseDue(dueText: string | null, reference: Date = new Date()): { tone: DueTone; label: string } {
+  if (!dueText) return { tone: 'vague', label: '' }
+  const raw = dueText.trim()
+  const t = raw.toLowerCase()
+  const ref = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate())
+  const DAY = 86400000
+
+  const daysUntil = (d: Date) => Math.round((d.getTime() - ref.getTime()) / DAY)
+  const classify = (days: number): DueTone => (days < 0 ? 'overdue' : days <= 3 ? 'soon' : 'scheduled')
+
+  if (/\btoday\b|\baaj\b/.test(t)) return { tone: 'soon', label: raw }
+  if (/\btomorrow\b|\bkal\b/.test(t)) return { tone: 'soon', label: raw }
+  if (/\byesterday\b/.test(t)) return { tone: 'overdue', label: raw }
+
+  const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+  const wd = WEEKDAYS.findIndex((name) => t.includes(name))
+  if (wd >= 0) {
+    // Next occurrence of that weekday (today counts as this week).
+    let delta = (wd - ref.getDay() + 7) % 7
+    if (delta === 0) delta = 0
+    const target = new Date(ref.getTime() + delta * DAY)
+    return { tone: classify(daysUntil(target)), label: raw }
+  }
+
+  // "the 20th", "by 5th", "on the 3rd"
+  const dom = t.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/)
+  if (dom) {
+    const day = parseInt(dom[1]!, 10)
+    if (day >= 1 && day <= 31) {
+      let target = new Date(ref.getFullYear(), ref.getMonth(), day)
+      if (target.getTime() < ref.getTime()) target = new Date(ref.getFullYear(), ref.getMonth() + 1, day)
+      return { tone: classify(daysUntil(target)), label: raw }
+    }
+  }
+
+  return { tone: 'vague', label: raw }
+}

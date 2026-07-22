@@ -7,6 +7,8 @@ import MeetingsPage from './pages/MeetingsPage'
 import MeetingDetailPage from './pages/MeetingDetailPage'
 import MemoryPage from './pages/MemoryPage'
 import TasksPage from './pages/TasksPage'
+import InsightsPage from './pages/InsightsPage'
+import CalendarPage from './pages/CalendarPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import SecurityPage from './pages/SecurityPage'
 
@@ -51,6 +53,8 @@ export default function App() {
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingDetailPage />} />
         <Route path="/ask" element={<MemoryPage />} />
+        <Route path="/insights" element={<InsightsPage />} />
+        <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/security" element={<SecurityPage />} />

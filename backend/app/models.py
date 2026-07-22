@@ -262,6 +262,39 @@ class ChatMessage(Base):
     )
 
 
+class MeetingInsight(Base):
+    """Cached AI insight for one meeting, computed on demand.
+
+    Decision extraction, the Blind Spot review and entity extraction are each a
+    full LLM call over the transcript — a few seconds and, on the hosted Groq
+    tier, a real rate-limit cost. There is no reason to recompute them every time
+    a page opens: the transcript does not change once a meeting is `ready`. So the
+    first request computes and stores; every later one is a dict read.
+
+    `payload_enc` is Fernet-encrypted like every other derived artefact that
+    contains meeting content — a decision quote or a flagged risk is exactly as
+    sensitive as the summary it came from, and must not sit in the database as
+    plaintext. `kind` distinguishes 'decisions' | 'blindspots' | 'entities'.
+    """
+
+    __tablename__ = "meeting_insights"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    payload_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "kind", name="uq_insight_meeting_kind"),
+        CheckConstraint(
+            "kind IN ('decisions','blindspots','entities')", name="ck_insight_kind"
+        ),
+    )
+
+
 class EmailDelivery(Base):
     __tablename__ = "email_deliveries"
 

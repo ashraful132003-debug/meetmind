@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from .config import BASE_DIR, settings
 from .db import engine, init_models
-from .routers import analytics, auth, chat, email, export, meetings, memory
+from .routers import analytics, auth, chat, email, export, insights, meetings, memory
 from .schemas import HealthResponse
 from .services.llm import health as llm_health
 
@@ -196,6 +196,7 @@ app.include_router(analytics.router)
 app.include_router(email.router)
 app.include_router(export.router)
 app.include_router(memory.router)
+app.include_router(insights.router)
 
 
 def _mount_spa() -> None:
