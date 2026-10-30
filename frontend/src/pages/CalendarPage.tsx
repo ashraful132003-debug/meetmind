@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../context/ToastContext'
 import { ApiError, api, type MeetingListItem } from '../lib/api'
@@ -35,10 +35,30 @@ export default function CalendarPage() {
     return { year: n.getFullYear(), month: n.getMonth() }
   })
 
+  // On first load, open the month of the newest meeting when the current month
+  // is empty - otherwise a workspace of older meetings opens on a blank grid.
+  const placedCursor = useRef(false)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setMeetings(await api.listMeetings())
+      const list = await api.listMeetings()
+      setMeetings(list)
+      if (!placedCursor.current && list.length > 0) {
+        placedCursor.current = true
+        const now = new Date()
+        const inCurrentMonth = list.some((m) => {
+          const d = new Date(m.created_at)
+          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+        })
+        if (!inCurrentMonth) {
+          const newest = list
+            .map((m) => new Date(m.created_at))
+            .filter((d) => !Number.isNaN(d.getTime()))
+            .sort((a, b) => b.getTime() - a.getTime())[0]
+          if (newest) setCursor({ year: newest.getFullYear(), month: newest.getMonth() })
+        }
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not load your meetings.')
     } finally {
