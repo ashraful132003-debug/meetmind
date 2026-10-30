@@ -146,7 +146,42 @@ async def _openai_chat(system: str, user: str, *, json_mode: bool, temperature: 
         raise LLMError(f"OpenAI API error {e.response.status_code}: {e.response.text[:300]}") from e
 
 
-async def _groq_chat(system: str, user: str, *, json_mode: bool, temperature: float) -> str:
+# Groq retires and renames models without notice. When the configured chat model
+# is gone, the app asks Groq what this key can use and switches to the best
+# match instead of failing every request until someone edits the environment.
+_groq_model_override: str | None = None
+
+_GROQ_NOT_CHAT = ("whisper", "guard", "tts", "playai", "orpheus", "embed", "safeguard", "distil")
+_GROQ_PREFERENCE = ("llama-3.3-70b", "70b", "gpt-oss-120b", "120b", "llama", "qwen", "gpt-oss", "kimi")
+
+
+def _best_groq_model(names: list[str], failed: str) -> str | None:
+    usable = [n for n in names if n != failed and not any(x in n.lower() for x in _GROQ_NOT_CHAT)]
+    for wanted in _GROQ_PREFERENCE:
+        for n in usable:
+            if wanted in n.lower():
+                return n
+    return usable[0] if usable else None
+
+
+async def _pick_groq_model(failed: str) -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+            )
+            r.raise_for_status()
+            names = [m["id"] for m in r.json().get("data", []) if m.get("active", True)]
+    except Exception as e:
+        log.warning("Could not list Groq models: %s", e)
+        return None
+    return _best_groq_model(names, failed)
+
+
+async def _groq_chat(
+    system: str, user: str, *, json_mode: bool, temperature: float, _retried: bool = False
+) -> str:
     """Groq's free tier — OpenAI-compatible, so this is the same shape as _openai_chat.
 
     Kept separate rather than parameterising _openai_chat because the error
@@ -159,8 +194,10 @@ async def _groq_chat(system: str, user: str, *, json_mode: bool, temperature: fl
             "LLM_PROVIDER=groq but GROQ_API_KEY is empty in .env. "
             "Get a free key (no card) at https://console.groq.com/keys"
         )
+    global _groq_model_override
+    model = _groq_model_override or settings.groq_chat_model
     body: dict[str, Any] = {
-        "model": settings.groq_chat_model,
+        "model": model,
         "temperature": temperature,
         "messages": [
             {"role": "system", "content": system},
@@ -179,6 +216,14 @@ async def _groq_chat(system: str, user: str, *, json_mode: bool, temperature: fl
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
     except httpx.HTTPStatusError as e:
+        if e.response.status_code in (400, 404) and not _retried and "model" in e.response.text.lower():
+            replacement = await _pick_groq_model(model)
+            if replacement:
+                log.warning("Groq model %s unavailable; switching to %s", model, replacement)
+                _groq_model_override = replacement
+                return await _groq_chat(
+                    system, user, json_mode=json_mode, temperature=temperature, _retried=True
+                )
         if e.response.status_code == 429:
             raise LLMError(
                 "Groq rate limit reached. The free tier allows a burst then throttles — "
@@ -309,17 +354,24 @@ async def health() -> dict:
                 )
                 r.raise_for_status()
                 names = [m["id"] for m in r.json().get("data", [])]
-            # The /models listing is not authoritative: this account can call
-            # llama-3.3-70b-versatile even though the listing omits it. So a
-            # missing name is logged, not reported as a degraded service - a
-            # false alarm in the status light is worse than none.
-            if settings.groq_chat_model not in names:
-                log.info("Groq /models does not list %s; relying on the live call.", settings.groq_chat_model)
+            global _groq_model_override
+            effective = _groq_model_override or settings.groq_chat_model
+            detail = ""
+            if effective not in names:
+                # The configured model is gone from this account. Switch to the
+                # best available one, and say so, rather than failing every call.
+                replacement = _best_groq_model(names, effective)
+                if replacement:
+                    log.warning("Groq model %s unavailable; switching to %s", effective, replacement)
+                    _groq_model_override = replacement
+                    effective = replacement
+                else:
+                    detail = f"Model not available on this account: {effective}"
             return {
                 "provider": "groq",
                 "reachable": True,
-                "models": [settings.groq_chat_model, settings.groq_whisper_model],
-                "detail": "",
+                "models": [effective, settings.groq_whisper_model],
+                "detail": detail,
             }
         except httpx.HTTPStatusError as e:
             detail = "API key rejected" if e.response.status_code == 401 else f"HTTP {e.response.status_code}"
