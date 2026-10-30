@@ -382,14 +382,14 @@ fits.
 | | Local (default) | Deployed |
 |---|---|---|
 | Transcription | Whisper `small`, on your GPU | Groq Whisper large-v3-turbo |
-| Language model | Llama 3.2 **3B** | Llama 3.3 **70B** |
+| Language model | Llama 3.2 **3B** | A large Groq-hosted model (configured: Llama 3.3 70B; falls back automatically if Groq retires it, currently `openai/gpt-oss-120b`) |
 | Retrieval | semantic (embeddings) | BM25 lexical |
 | Audio leaves the machine? | **Never** | **Yes — sent to Groq** |
 | Cost | ₹0 | ₹0 |
 
 Two things follow that are worth saying out loud:
 
-**The deployed build is smarter, not weaker.** 70B beats the 3B a laptop can run —
+**The deployed build is smarter, not weaker.** A ~100B+ hosted model beats the 3B a laptop can run —
 which is why cross-meeting attribution measures 3/3 on the live instance and 6/7
 locally. You trade privacy for capability, and the code makes that a one-variable
 decision instead of a rewrite.

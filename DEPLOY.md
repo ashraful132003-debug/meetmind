@@ -12,7 +12,7 @@ interesting thing about this project — do not hide it in an interview, lead wi
 | | **Local mode** (your laptop) | **Deployed mode** (the live link) |
 |---|---|---|
 | Transcription | Whisper, on your machine | Groq's Whisper (free tier) |
-| Language model | Llama 3.2 3B, on your machine | Llama 3.3 **70B** via Groq (free tier) |
+| Language model | Llama 3.2 3B, on your machine | A large Groq-hosted model (Llama 3.3 70B configured; the app switches to an available model if Groq retires it) |
 | Retrieval | semantic (embeddings) | BM25 lexical |
 | Audio leaves your machine? | **Never** | **Yes — sent to Groq** |
 | Cost | ₹0 | ₹0 |
