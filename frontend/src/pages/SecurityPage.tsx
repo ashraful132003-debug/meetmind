@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { ApiError, api, type HealthResponse, type SessionInfo } from '../lib/api'
 import { formatDateTime, formatRelativeTime } from '../lib/format'
+import { useDeployMode } from '../lib/deployMode'
 import { IconAlert, IconCheckCircle, IconGlobe, IconLock, IconShield } from '../components/Icons'
 
 /** Turns a raw UA string into something a human recognises. Best-effort by
@@ -42,12 +43,22 @@ function describeDevice(ua: string): string {
   return os ? `${browser} on ${os}` : browser
 }
 
-const GUARANTEES = [
-  {
+// What the first card says depends on how this build is deployed: the
+// "never leaves this machine" claim is only true with local models.
+const PRIVACY_GUARANTEE = {
+  local: {
     icon: IconLock,
     title: 'Your audio never leaves this machine',
     body: 'Whisper transcribes locally and Llama summarises locally. There is no cloud API in the request path — you can unplug the internet and the app still works.',
   },
+  hosted: {
+    icon: IconLock,
+    title: 'Local mode keeps audio on your machine',
+    body: 'This hosted demo sends audio to Groq for transcription and summaries, because a free server cannot run the models. Run MeetMind locally (the default) and nothing leaves your machine.',
+  },
+}
+
+const GUARANTEES = [
   {
     icon: IconShield,
     title: 'Transcripts are encrypted at rest',
@@ -69,6 +80,7 @@ export default function SecurityPage() {
   const { user, logout } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
+  const deployMode = useDeployMode()
 
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [health, setHealth] = useState<HealthResponse | null>(null)
@@ -192,7 +204,7 @@ export default function SecurityPage() {
       <div className="card card-pad stack gap-4">
         <span className="eyebrow">How your data is protected</span>
         <div className="stack gap-4">
-          {GUARANTEES.map(({ icon: Icon, title, body }) => (
+          {[PRIVACY_GUARANTEE[deployMode], ...GUARANTEES].map(({ icon: Icon, title, body }) => (
             <div key={title} className="row gap-3" style={{ alignItems: 'flex-start' }}>
               <div className="feature-icon" style={{ marginTop: 1 }}>
                 <Icon size={13} />

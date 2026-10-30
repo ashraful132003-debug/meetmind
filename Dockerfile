@@ -17,6 +17,13 @@ COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 
 COPY frontend/ ./
+
+# Hosted demo only: prefill the login form with the seeded demo account.
+# The same credentials are published in the README. Pass empty values to
+# build an image with a blank login form.
+ARG VITE_DEMO_EMAIL=demo@meetmind.app
+ARG VITE_DEMO_PASSWORD=meetmind-demo-2026
+ENV VITE_DEMO_EMAIL=$VITE_DEMO_EMAIL     VITE_DEMO_PASSWORD=$VITE_DEMO_PASSWORD
 RUN npm run build
 
 

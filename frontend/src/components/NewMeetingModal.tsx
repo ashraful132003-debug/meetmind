@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../context/ToastContext'
 import { ApiError, api } from '../lib/api'
 import { formatBytes, formatDuration } from '../lib/format'
+import { useDeployMode } from '../lib/deployMode'
 import { IconAlert, IconFile, IconMic, IconUpload, IconX } from './Icons'
 
 type Mode = 'record' | 'upload'
@@ -22,6 +23,7 @@ interface Props {
  */
 export default function NewMeetingModal({ onClose, onCreated }: Props) {
   const toast = useToast()
+  const isLocal = useDeployMode() === 'local'
   const [mode, setMode] = useState<Mode>('record')
   const [title, setTitle] = useState('')
 
@@ -263,7 +265,9 @@ export default function NewMeetingModal({ onClose, onCreated }: Props) {
                 New meeting
               </h2>
               <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-                Everything is processed on this machine.
+                {isLocal
+                  ? 'Everything is processed on this machine.'
+                  : 'Hosted demo: audio is sent to Groq for transcription.'}
               </p>
             </div>
             <button className="btn btn-icon btn-ghost" onClick={handleClose} disabled={uploading} aria-label="Close">

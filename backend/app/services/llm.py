@@ -300,12 +300,17 @@ async def health() -> dict:
                 )
                 r.raise_for_status()
                 names = [m["id"] for m in r.json().get("data", [])]
-            missing = [m for m in (settings.groq_chat_model,) if m not in names]
+            # The /models listing is not authoritative: this account can call
+            # llama-3.3-70b-versatile even though the listing omits it. So a
+            # missing name is logged, not reported as a degraded service - a
+            # false alarm in the status light is worse than none.
+            if settings.groq_chat_model not in names:
+                log.info("Groq /models does not list %s; relying on the live call.", settings.groq_chat_model)
             return {
                 "provider": "groq",
                 "reachable": True,
                 "models": [settings.groq_chat_model, settings.groq_whisper_model],
-                "detail": f"Model not available on this account: {', '.join(missing)}" if missing else "",
+                "detail": "",
             }
         except httpx.HTTPStatusError as e:
             detail = "API key rejected" if e.response.status_code == 401 else f"HTTP {e.response.status_code}"

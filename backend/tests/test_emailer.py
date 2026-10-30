@@ -17,7 +17,7 @@ ACTIONS = [
 def render(**overrides):
     kwargs = dict(
         meeting_title="Sprint standup",
-        sender_name="Ashray",
+        sender_name="Ashraful",
         summary_md="## Overview\nWe shipped.",
         action_items=ACTIONS,
         speakers=SPEAKERS,

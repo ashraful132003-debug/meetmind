@@ -29,7 +29,7 @@ BASE = "http://127.0.0.1:8000"
 # and email-validator rejects it - correctly, since mail could never be delivered.
 DEMO_EMAIL = "demo@example.com"
 DEMO_PASSWORD = "demo-meetmind-2026"
-DEMO_NAME = "Ashray Sharma"
+DEMO_NAME = "Ashraful Haque"
 
 # Titles are deliberately left empty for two of these so the LLM names them -
 # it demonstrates the auto-titling and proves the model actually read the content.

@@ -60,16 +60,22 @@ function HealthPill() {
   }, [])
 
   const healthy = health?.status === 'healthy'
+  const isLocal = health?.llm.provider === 'ollama'
   const color = !health ? 'var(--danger)' : healthy ? 'var(--success)' : 'var(--warning)'
-  const label = !health ? 'Backend offline' : healthy ? 'All systems local' : 'Degraded'
+  const label = !health ? 'Backend offline' : healthy ? (isLocal ? 'All systems local' : 'All systems online') : 'Degraded'
 
   const detail = !health
     ? 'The API is not responding. Start it with: uvicorn app.main:app --reload'
     : !health.database
       ? 'PostgreSQL is unreachable. Start it with: .\\scripts\\pg.ps1 start'
       : !health.llm.reachable
-        ? `Ollama is unreachable. Start it with: ollama serve`
-        : health.llm.detail || 'Transcription and analysis are running on this machine.'
+        ? isLocal
+          ? 'Ollama is unreachable. Start it with: ollama serve'
+          : `The ${health.llm.provider} language-model service is unreachable.`
+        : health.llm.detail ||
+          (isLocal
+            ? 'Transcription and analysis are running on this machine.'
+            : 'Hosted demo: transcription and analysis run through Groq.')
 
   return (
     <div className="stack gap-2">

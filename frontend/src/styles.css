@@ -1485,6 +1485,7 @@ h3 {
     box-shadow: var(--shadow-lg);
   }
   .page {
-    padding: 18px 16px 50px;
+    /* top padding clears the fixed menu button */
+    padding: 64px 16px 50px;
   }
 }

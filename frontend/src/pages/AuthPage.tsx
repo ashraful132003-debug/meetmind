@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { ApiError } from '../lib/api'
+import { useDeployMode } from '../lib/deployMode'
 import { IconAlert, IconGlobe, IconLock, IconMic, IconShield, IconSparkle } from '../components/Icons'
 
 /**
@@ -28,6 +29,23 @@ function scorePassword(pw: string): { score: number; label: string; color: strin
   const labels = ['Too weak', 'Weak', 'Fair', 'Strong', 'Excellent']
   const colors = ['var(--danger)', 'var(--danger)', 'var(--warning)', 'var(--success)', 'var(--success)']
   return { score: capped, label: labels[capped] ?? '', color: colors[capped] ?? 'var(--text-quaternary)' }
+}
+
+// Set at build time for the hosted demo so a reviewer can just press Sign in.
+// Left empty in local builds, where the login form should start blank.
+const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL ?? ''
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD ?? ''
+
+// Hosted-demo wording for the two cards that claim local processing.
+const HOSTED_FEATURES: Record<string, { title: string; body: string }> = {
+  'Transcription that runs here': {
+    title: 'Transcription',
+    body: 'The hosted demo uses Groq Whisper. Run MeetMind locally and your recordings never leave your machine.',
+  },
+  'Summaries and action items': {
+    title: 'Summaries and action items',
+    body: 'A language model reads the transcript and pulls out who committed to what, with timestamps.',
+  },
 }
 
 const FEATURES = [
@@ -58,12 +76,13 @@ export default function AuthPage() {
   const navigate = useNavigate()
   const { login, register } = useAuth()
   const toast = useToast()
+  const isLocal = useDeployMode() === 'local'
 
   const isRegister = location.pathname === '/register'
 
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(isRegister ? '' : DEMO_EMAIL)
   const [fullName, setFullName] = useState('')
-  const [password, setPassword] = useState('')
+  const [password, setPassword] = useState(isRegister ? '' : DEMO_PASSWORD)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -97,7 +116,8 @@ export default function AuthPage() {
 
   const switchMode = () => {
     setError('')
-    setPassword('')
+    setPassword(isRegister ? DEMO_PASSWORD : '')
+    setEmail(isRegister ? DEMO_EMAIL : '')
     navigate(isRegister ? '/login' : '/register', { replace: true })
   }
 
@@ -137,7 +157,9 @@ export default function AuthPage() {
           </div>
 
           <div className="stack">
-            {FEATURES.map(({ icon: Icon, title, body }) => (
+            {FEATURES.map((f) => {
+              const { icon: Icon, title, body } = isLocal ? f : { ...f, ...HOSTED_FEATURES[f.title] }
+              return (
               <div key={title} className="feature-line">
                 <div className="feature-icon">
                   <Icon size={13} />
@@ -147,13 +169,18 @@ export default function AuthPage() {
                   <span style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>{body}</span>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
 
         <div className="row gap-2" style={{ color: 'var(--text-quaternary)', fontSize: 11.5 }}>
           <IconLock size={12} />
-          <span>Runs entirely on your machine. No cloud, no API keys, no data leaves this laptop.</span>
+          <span>
+            {isLocal
+              ? 'Runs entirely on your machine. No cloud, no API keys, no data leaves this laptop.'
+              : 'Hosted demo build. The local build keeps all processing on your own machine.'}
+          </span>
         </div>
       </aside>
 
@@ -164,7 +191,11 @@ export default function AuthPage() {
               {isRegister ? 'Create your account' : 'Welcome back'}
             </h2>
             <p style={{ color: 'var(--text-tertiary)', fontSize: 13.5 }}>
-              {isRegister ? 'Your meetings stay private to this account.' : 'Sign in to your meetings.'}
+              {isRegister
+                ? 'Your meetings stay private to this account.'
+                : DEMO_EMAIL
+                  ? 'Demo account is filled in below. Just press Sign in.'
+                  : 'Sign in to your meetings.'}
             </p>
           </div>
 
@@ -179,7 +210,7 @@ export default function AuthPage() {
                   className="input"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Ashray Sharma"
+                  placeholder="Ashraful Haque"
                   autoComplete="name"
                   required
                   minLength={2}

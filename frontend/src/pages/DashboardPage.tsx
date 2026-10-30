@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { ApiError, api, type MeetingListItem, type WorkspaceStats } from '../lib/api'
 import { formatDurationLong, isProcessing } from '../lib/format'
+import { useDeployMode } from '../lib/deployMode'
 import MeetingCard from '../components/MeetingCard'
 import {
   IconCheckCircle,
@@ -89,6 +90,7 @@ export default function DashboardPage() {
 
   const firstName = user?.full_name.trim().split(' ')[0] ?? ''
   const recent = meetings.slice(0, 6)
+  const isLocal = useDeployMode() === 'local'
 
   return (
     <div className="page stack gap-6">
@@ -101,7 +103,7 @@ export default function DashboardPage() {
               ? 'Loading...'
               : stats?.total_meetings === 0
                 ? 'Record your first meeting to see it transcribed and summarised.'
-                : `${stats?.total_meetings} meeting${stats?.total_meetings === 1 ? '' : 's'} · everything processed on this machine`}
+                : `${stats?.total_meetings} meeting${stats?.total_meetings === 1 ? '' : 's'} ${isLocal ? '· everything processed on this machine' : ''}`}
           </p>
         </div>
 
@@ -162,9 +164,9 @@ export default function DashboardPage() {
             icon={<IconCheckCircle size={14} />}
           />
           <StatTile
-            label="Data sent to cloud"
-            value="0 bytes"
-            sub="Whisper and Llama run locally"
+            label={isLocal ? 'Data sent to cloud' : 'AI processing'}
+            value={isLocal ? '0 bytes' : 'Hosted'}
+            sub={isLocal ? 'Whisper and Llama run locally' : 'Demo build uses Groq; local mode keeps audio on-device'}
             icon={<IconLock size={14} />}
           />
         </div>
