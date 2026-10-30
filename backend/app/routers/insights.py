@@ -51,7 +51,7 @@ from ..schemas import (
 )
 from ..security import decrypt_text, encrypt_text
 from ..services import insights
-from ..services.llm import LLMError, LLMUnavailable
+from ..services.llm import LLMError, LLMUnavailable, user_facing
 
 log = logging.getLogger(__name__)
 
@@ -330,7 +330,9 @@ async def contradictions_board(
             [{k: v for k, v in n.items() if k != "_item"} for n in numbered]
         )
     except (LLMError, LLMUnavailable) as e:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Could not check for contradictions.") from e
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, user_facing(e, "Could not check for contradictions.")
+        ) from e
 
     by_number = {n["number"]: n["_item"] for n in numbered}
     contradictions = []
@@ -591,7 +593,9 @@ async def blind_spots(
     except LLMUnavailable as e:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e
     except LLMError as e:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Could not review this meeting.") from e
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, user_facing(e, "Could not review this meeting.")
+        ) from e
 
     if not result:
         raise HTTPException(status.HTTP_409_CONFLICT, "This meeting has no transcript to review.")
@@ -666,7 +670,9 @@ async def meeting_prep(
     except LLMUnavailable as e:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e
     except LLMError as e:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Could not prepare a briefing.") from e
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, user_facing(e, "Could not prepare a briefing.")
+        ) from e
 
     return PrepResponse(
         meeting_id=str(meeting.id),

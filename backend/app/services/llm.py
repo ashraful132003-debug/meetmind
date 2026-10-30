@@ -34,6 +34,14 @@ class LLMError(RuntimeError):
     pass
 
 
+def user_facing(e: Exception, fallback: str) -> str:
+    """Message safe to show a user. Provider errors can carry request details, so
+    only the rate-limit text (written for users in _groq_chat) is passed through;
+    everything else gets the caller's generic wording."""
+    text = str(e)
+    return text if "rate limit" in text.lower() else fallback
+
+
 class LLMUnavailable(LLMError):
     """Raised when the provider cannot be reached at all — surfaced to the user
     as an actionable message rather than a generic failure."""

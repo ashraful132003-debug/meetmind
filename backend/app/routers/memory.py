@@ -28,7 +28,7 @@ from ..schemas import (
 )
 from ..security import decrypt_text, encrypt_text
 from ..services import memory
-from ..services.llm import LLMError, LLMUnavailable
+from ..services.llm import LLMError, LLMUnavailable, user_facing
 
 log = logging.getLogger(__name__)
 
@@ -182,7 +182,8 @@ async def ask_memory(
     except LLMError as e:
         log.exception("Memory chat failed")
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, "The language model failed to answer. Please try again."
+            status.HTTP_502_BAD_GATEWAY,
+            user_facing(e, "The language model failed to answer. Please try again."),
         ) from e
 
     answer = result.text
@@ -384,7 +385,7 @@ async def draft_followup(
     except LLMUnavailable as e:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e
     except LLMError as e:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Could not draft the email.") from e
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, user_facing(e, "Could not draft the email.")) from e
 
     data = parse_json(raw, fallback={})
     if not isinstance(data, dict) or not data.get("body"):

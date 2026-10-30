@@ -14,7 +14,7 @@ from ..models import ChatMessage, Meeting, TranscriptChunk
 from ..schemas import ChatMessageOut, ChatRequest, ChatResponse, Citation
 from ..security import decrypt_text, encrypt_text
 from ..services import rag
-from ..services.llm import LLMError, LLMUnavailable
+from ..services.llm import LLMError, LLMUnavailable, user_facing
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +120,8 @@ async def ask(
     except LLMError as e:
         log.exception("Chat failed")
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, "The language model failed to answer. Please try again."
+            status.HTTP_502_BAD_GATEWAY,
+            user_facing(e, "The language model failed to answer. Please try again."),
         ) from e
 
     citations = rag.build_citations(retrieved)
