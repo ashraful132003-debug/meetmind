@@ -35,11 +35,12 @@ class LLMError(RuntimeError):
 
 
 def user_facing(e: Exception, fallback: str) -> str:
-    """Message safe to show a user. Provider errors can carry request details, so
-    only the rate-limit text (written for users in _groq_chat) is passed through;
-    everything else gets the caller's generic wording."""
+    """Message to show a user. Groq's own error text (status code plus the API's
+    message, already truncated in _groq_chat; it never contains the key) is passed
+    through, because "the model failed" gives nobody a way to fix it. Other
+    providers' errors get the caller's generic wording."""
     text = str(e)
-    return text if "rate limit" in text.lower() else fallback
+    return text if text.startswith("Groq") else fallback
 
 
 class LLMUnavailable(LLMError):
